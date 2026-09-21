@@ -1,0 +1,11 @@
+fastapi[standard]
+sqlalchemy
+psycopg[binary]
+alembic
+pyjwt
+pwdlib[argon2]
+pydantic-settings
+python-multipart
+imagekitio
+sendgrid
+fastapi-mail
