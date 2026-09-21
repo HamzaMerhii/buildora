@@ -1,0 +1,13 @@
+import Link from 'next/link';
+import { type ReactNode } from 'react';
+import { ArrowLeft, ArrowRight, Inbox, Plus } from 'lucide-react';
+import { label } from '@/lib/utils/format';
+export function ButtonLink({href,children,secondary=false}:{href:string;children:ReactNode;secondary?:boolean}){return <Link className={'button '+(secondary?'secondary':'')} href={href}>{children}</Link>;}
+export function PageHeader({title,description,eyebrow,children,back}:{title:string;description?:string;eyebrow?:string;children?:ReactNode;back?:string}){return <div className="page-header"><div>{back&&<Link className="back-link" href={back}><ArrowLeft size={14}/> Back</Link>}{eyebrow&&<div className="eyebrow">{eyebrow}</div>}<h1>{title}</h1>{description&&<p>{description}</p>}</div><div className="actions">{children}</div></div>;}
+export function Panel({title,subtitle,action,children,className=''}:{title?:string;subtitle?:string;action?:ReactNode;children:ReactNode;className?:string}){return <section className={'panel '+className}>{title&&<div className="panel-heading"><div><h2>{title}</h2>{subtitle&&<p>{subtitle}</p>}</div>{action}</div>}{children}</section>;}
+export function Badge({value}:{value:string}){const tone=/COMPLETED|AVAILABLE|Active|Cleared/i.test(value)?'success':/ON_HOLD|Overdue|Inactive|SOLD/i.test(value)?'danger':/PROGRESS|RESERVED|NEW|Planning/i.test(value)?'amber':'neutral';return <span className={'badge '+tone}>{label(value)}</span>;}
+export function Progress({value}:{value:number}){return <div className="progress-row"><div className="progress-track"><span style={{width:Math.min(100,Math.max(0,value))+'%'}}/></div><span>{value}%</span></div>;}
+export function StatCard({label:caption,value,detail,icon}:{label:string;value:string|number;detail?:string;icon?:ReactNode}){return <div className="stat-card"><div className="stat-label">{caption}{icon}</div><strong>{value}</strong>{detail&&<p>{detail}</p>}</div>;}
+export function EmptyState({title='No records found',description='Try adjusting your search or filters.',href,action='Create record'}:{title?:string;description?:string;href?:string;action?:string}){return <div className="empty-state"><div className="empty-icon"><Inbox size={32}/></div><h2>{title}</h2><p>{description}</p>{href&&<ButtonLink href={href}><Plus size={16}/>{action}</ButtonLink>}</div>;}
+export function DetailList({items}:{items:[string,ReactNode][]}){return <dl className="detail-list">{items.map(([key,value])=><div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>;}
+export function TextLink({href,children}:{href:string;children:ReactNode}){return <Link className="text-link" href={href}>{children}<ArrowRight size={14}/></Link>;}

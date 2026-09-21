@@ -1,0 +1,4 @@
+export const money = (value:number,currency='USD') => new Intl.NumberFormat('en-US',{style:'currency',currency,maximumFractionDigits:0}).format(value);
+export const label = (value:string) => value.toLowerCase().replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
+export const displayDate = (value:string) => new Date(value.length===10?value+'T12:00:00':value).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+export function exportCsv<T extends object>(name:string, rows:T[]) { const keys=Object.keys(rows[0]??{}) as (keyof T)[];const csv=[keys,...rows.map(row=>keys.map(k=>String(row[k]??'')))].map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n'); const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));const a=document.createElement('a');a.href=url;a.download=name+'.csv';a.click();URL.revokeObjectURL(url); }
