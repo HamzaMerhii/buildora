@@ -2,16 +2,25 @@
 
 import Link from 'next/link';
 import { useParams, usePathname } from 'next/navigation';
+import {
+  LayoutGrid,
+  Building2,
+  HardHat,
+  DoorOpen,
+  Wallet,
+  FileText,
+  type LucideIcon,
+} from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { canAccess, type ModuleKey } from '@/lib/auth/permissions';
 
-const TABS: Array<{ name: string; path: string; module: ModuleKey }> = [
-  { name: 'Overview', path: '', module: 'projects' },
-  { name: 'Structure', path: '/structure', module: 'projects' },
-  { name: 'Construction', path: '/construction', module: 'construction' },
-  { name: 'Apartments', path: '/apartments', module: 'apartments' },
-  { name: 'Payments', path: '/payments', module: 'payments' },
-  { name: 'Documents', path: '/documents', module: 'documents' },
+const TABS: Array<{ name: string; path: string; module: ModuleKey; Icon: LucideIcon }> = [
+  { name: 'Overview', path: '', module: 'projects', Icon: LayoutGrid },
+  { name: 'Structure', path: '/structure', module: 'projects', Icon: Building2 },
+  { name: 'Construction', path: '/construction', module: 'construction', Icon: HardHat },
+  { name: 'Apartments', path: '/apartments', module: 'apartments', Icon: DoorOpen },
+  { name: 'Payments', path: '/payments', module: 'payments', Icon: Wallet },
+  { name: 'Documents', path: '/documents', module: 'documents', Icon: FileText },
 ];
 
 /** Form pages keep their own Back-button flow and stay outside the tab shell. */
@@ -54,12 +63,21 @@ export function ProjectNavTabs() {
   if (!visible.length) return null;
 
   return (
-    <nav className="tabs" aria-label="Project sections">
-      {visible.map(({ name, path }) => (
-        <Link key={name} className={name === active ? 'active' : ''} href={base + path}>
-          {name}
-        </Link>
-      ))}
+    <nav className="tabs project-tabs" aria-label="Project sections">
+      {visible.map(({ name, path, Icon }) => {
+        const isActive = name === active;
+        return (
+          <Link
+            key={name}
+            className={isActive ? 'active' : ''}
+            aria-current={isActive ? 'page' : undefined}
+            href={base + path}
+          >
+            <Icon size={15} aria-hidden="true" />
+            {name}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

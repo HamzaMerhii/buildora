@@ -10,6 +10,7 @@ import type { CompanyRole } from '@/stores/auth.store';
  *
  * Mirrors the backend intent in `dependencies/permissions.py`:
  * - projects/buildings/floors/apartments/stages/land mutate ≈ require_project_manager (OWNER, PROJECT_MANAGER)
+ * - tasks mutate ≈ require_site_management (OWNER, PROJECT_MANAGER, SITE_ENGINEER)
  * - project/floor/stage reads ≈ require_site_management / require_company_member
  * - finance areas ≈ require_finance (OWNER, FINANCE)
  *
@@ -18,8 +19,17 @@ import type { CompanyRole } from '@/stores/auth.store';
  * OWNER/PROJECT_MANAGER/SITE_ENGINEER, detail allows OWNER/PROJECT_MANAGER),
  * so the frontend no longer grants those roles the `projects` module.
  * All apartment endpoints require OWNER/PROJECT_MANAGER, so only those
- * roles hold the `apartments`/`apartments-mutate` modules. Task/lead/
- * party/payment/document routers do not exist yet.
+ * roles hold the `apartments`/`apartments-mutate` modules. All party
+ * endpoints require OWNER/PROJECT_MANAGER, so only those roles hold
+ * the `parties` module. Task reads require any company member and task
+ * mutations require site management (OWNER, PROJECT_MANAGER,
+ * SITE_ENGINEER). All document endpoints require site management
+ * (OWNER, PROJECT_MANAGER, SITE_ENGINEER), so only those roles hold
+ * the `documents` module. All company/member settings endpoints
+ * require OWNER, so only owners hold `settings`/`team`; every
+ * authenticated company user keeps `profile`. All lead endpoints
+ * require OWNER/SALES (require_sales), so only those roles hold the
+ * `leads` module.
  */
 export type ModuleKey =
   | 'dashboard-owner'
@@ -30,6 +40,7 @@ export type ModuleKey =
   | 'projects-mutate'
   | 'construction'
   | 'tasks'
+  | 'tasks-mutate'
   | 'apartments'
   | 'apartments-mutate'
   | 'leads'
@@ -51,6 +62,7 @@ const ALL_MODULES: readonly ModuleKey[] = [
   'projects-mutate',
   'construction',
   'tasks',
+  'tasks-mutate',
   'apartments',
   'apartments-mutate',
   'leads',
@@ -73,11 +85,11 @@ export const ROLE_MODULES: Record<CompanyRole, readonly ModuleKey[]> = {
     'projects-mutate',
     'construction',
     'tasks',
+    'tasks-mutate',
     'apartments',
     'apartments-mutate',
+    'parties',
     'documents',
-    'team',
-    'settings',
     'profile',
     'assistant',
     'app-root',
@@ -87,6 +99,7 @@ export const ROLE_MODULES: Record<CompanyRole, readonly ModuleKey[]> = {
     'projects',
     'construction',
     'tasks',
+    'tasks-mutate',
     'documents',
     'profile',
     'assistant',
@@ -95,7 +108,6 @@ export const ROLE_MODULES: Record<CompanyRole, readonly ModuleKey[]> = {
   SALES: [
     'dashboard-sales',
     'leads',
-    'documents',
     'profile',
     'assistant',
     'app-root',
@@ -103,8 +115,6 @@ export const ROLE_MODULES: Record<CompanyRole, readonly ModuleKey[]> = {
   FINANCE: [
     'dashboard-finance',
     'payments',
-    'parties',
-    'documents',
     'profile',
     'assistant',
     'app-root',
@@ -133,6 +143,9 @@ const PATH_RULES: readonly PathRule[] = [
   { prefix: '/app/projects', module: 'projects' },
   { prefix: '/app/buildings', module: 'projects-mutate' },
   { prefix: '/app/construction', module: 'construction' },
+  { prefix: '/app/tasks/new', module: 'tasks-mutate' },
+  { prefix: '/app/tasks', contains: '/edit', module: 'tasks-mutate' },
+  { prefix: '/app/tasks', contains: '/updates/', module: 'tasks-mutate' },
   { prefix: '/app/tasks', module: 'tasks' },
   { prefix: '/app/apartments/new', module: 'apartments-mutate' },
   { prefix: '/app/apartments', contains: '/edit', module: 'apartments-mutate' },

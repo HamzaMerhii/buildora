@@ -55,7 +55,7 @@ class ProjectResponse(BaseSchema):
 
     start_date: Optional[date]
     expected_end_date: Optional[date]
-
+    progress_percent: int
     status: ProjectStatus
 
     budget: Optional[Decimal]
@@ -66,3 +66,11 @@ class ProjectResponse(BaseSchema):
 
 class ProjectCreateResponse(BaseSchema):
     message: str
+
+
+
+class ProjectProgressUpdateResponse(BaseSchema):
+    id: UUID
+    project_id: UUID
+    progress_percent: int
+    created_at: datetime

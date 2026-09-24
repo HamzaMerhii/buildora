@@ -8,4 +8,3 @@ export const companySetupSchema = z.object({
   address: z.string().trim().optional(),
 });
 export const memberSchema = z.object({ name: requiredText, email: z.string().trim().email('Enter a valid email address'), role: companyRole, active: z.boolean() });
-export const platformRoleSchema = z.object({ role: z.enum(['SUPER_ADMIN','USER']) });

@@ -1,2 +1,2 @@
-import { PaymentsList } from '@/components/features/Business';
-export default function Page(){return <PaymentsList />;}
+import { PaymentsWorkspaceList } from '@/components/features/PaymentsApi';
+export default function Page(){return <PaymentsWorkspaceList />;}

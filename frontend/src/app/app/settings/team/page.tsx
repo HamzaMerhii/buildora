@@ -1,2 +1,2 @@
-import { Settings } from '@/components/features/Settings';
-export default function Page(){return <Settings tab="team"/>;}
+import { SettingsWorkspace } from '@/components/features/SettingsApi';
+export default function Page(){return <SettingsWorkspace tab="team" />;}

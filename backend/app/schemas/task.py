@@ -9,18 +9,13 @@ from app.models.task import TaskStatus
 
 
 class TaskCreate(BaseSchema):
-    title: str = Field(
-        ...,
-        min_length=1,
-        max_length=200,
-    )
-
+    title: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
 
     assigned_to: Optional[UUID] = None
+    party_id: Optional[UUID] = None
 
     start_date: Optional[date] = None
-
     due_date: Optional[date] = None
 
     status: TaskStatus = TaskStatus.NOT_STARTED
@@ -42,9 +37,9 @@ class TaskUpdate(BaseSchema):
     description: Optional[str] = None
 
     assigned_to: Optional[UUID] = None
+    party_id: Optional[UUID] = None
 
     start_date: Optional[date] = None
-
     due_date: Optional[date] = None
 
     status: Optional[TaskStatus] = None
@@ -63,6 +58,7 @@ class TaskResponse(BaseSchema):
     description: Optional[str]
 
     assigned_to: Optional[UUID]
+    party_id: Optional[UUID]
 
     start_date: Optional[date]
     due_date: Optional[date]

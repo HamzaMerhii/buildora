@@ -4,7 +4,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 from enum import Enum
 
-from sqlalchemy import Enum as SQLEnum, ForeignKey, Numeric, String
+from sqlalchemy import CheckConstraint, Enum as SQLEnum, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
@@ -17,7 +17,12 @@ class ProjectStatus(str, Enum):
 
 class Project(Base):
     __tablename__ = "projects"
-
+    __table_args__ = (
+    CheckConstraint(
+        "progress >= 0 AND progress <= 100",
+        name="check_project_progress"
+    ),
+)
     id: Mapped[UUID] = mapped_column(
         primary_key=True,
         default=uuid4,
@@ -64,7 +69,9 @@ class Project(Base):
     image: Mapped[Optional[str]] = mapped_column(
             nullable=True,
         )
-
+    progress_percent: Mapped[int] = mapped_column(
+    default=0,
+    )
     created_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow,
     )
@@ -113,3 +120,9 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+
+    documents = relationship(
+    "Document",
+    back_populates="project",
+    cascade="all, delete-orphan",
+)

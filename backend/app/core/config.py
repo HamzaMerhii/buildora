@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     MAIL_FROM_NAME: str = "Buildora"
 
     FRONTEND_URL: str = "http://localhost:3000"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 180
 
     IMAGEKIT_PUBLIC_KEY: str = ""
     IMAGEKIT_PRIVATE_KEY: str = ""

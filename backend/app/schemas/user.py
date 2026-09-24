@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional
 
 from app.models import PlatformRole
+from app.schemas.base import BaseSchema
 
 
 class UserBaseSchema(BaseModel):
@@ -23,22 +24,18 @@ class UserCreateSchema(UserBaseSchema):
         description="Password must be at least 8 characters"
     )
 
-class UserUpdateSchema(BaseModel):
+class UserUpdateSchema(BaseSchema):
     name: Optional[str] = Field(
-        None,
-        min_length=1
+        default=None,
+        min_length=1,
+        max_length=200,
     )
 
     email: Optional[EmailStr] = None
 
-    phone: str = Field(
-        ...,
-        pattern=r"^\+?[0-9]{8,15}$"
-    )
-
-    password: Optional[str] = Field(
-        None,
-        min_length=8
+    phone: Optional[str] = Field(
+        default=None,
+        pattern=r"^\+?[0-9]{8,15}$",
     )
 
 class UserUpdateByAdminSchema(UserUpdateSchema):

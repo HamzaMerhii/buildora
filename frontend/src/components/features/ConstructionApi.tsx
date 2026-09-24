@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
-import { Plus, Pencil, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, ChevronUp, ChevronDown, Layers, ClipboardList, CircleCheck, TriangleAlert } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { canAccess } from '@/lib/auth/permissions';
 import {
@@ -16,9 +16,17 @@ import {
   type ApiStage,
 } from '@/lib/api/construction-stage.api';
 import { getProject, getProjects } from '@/lib/api/project.api';
+import {
+  getStageTasks,
+  getTaskUpdates,
+  isTaskOverdue,
+  type ApiTask,
+  type ApiTaskUpdate,
+} from '@/lib/api/task.api';
+import { getParties } from '@/lib/api/party.api';
+import { TaskTableReal, StageTasksSection, resolveUpdateAuthorName, useCompanyMembers } from './TasksApi';
 import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { useWorkspace } from './WorkspaceProvider';
-import { TasksTable } from './Construction';
 import { displayDate } from '@/lib/utils/format';
 import {
   PageHeader,
@@ -27,6 +35,7 @@ import {
   Badge,
   Panel,
   EmptyState,
+  Progress,
 } from '../ui/Primitives';
 import { ConfirmDialog } from '../ui/Dialog';
 
@@ -165,20 +174,25 @@ function useCompanyId(): string | null {
 /**
  * Real Construction overview. When projectId is fixed (project subpage)
  * the selector is hidden; otherwise projects come from the real list.
- * Stage stats are real; task sections stay mock-driven until the tasks
- * task (mock task ids never match real stage ids, so they render empty).
+ * Stage and task sections are real; update history is aggregated across
+ * the project's tasks.
  */
 export function ConstructionWorkspaceOverview({ projectId }: { projectId?: string }) {
   const companyId = useCompanyId();
+  const sessionUser = useAuthStore((s) => s.user);
   const canMutate = useCanMutateStages();
-  const { data } = useWorkspace();
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [project, setProject] = useState(projectId ?? '');
   const [projectName, setProjectName] = useState('');
   const [stages, setStages] = useState<ApiStage[]>([]);
+  const [tasks, setTasks] = useState<ApiTask[]>([]);
+  const [partyNames, setPartyNames] = useState<Map<string, string>>(new Map());
+  const [updates, setUpdates] = useState<ApiTaskUpdate[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(!projectId);
   const [loadingStages, setLoadingStages] = useState(true);
+  const [loadingTasks, setLoadingTasks] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { membersByUserId } = useCompanyMembers(companyId);
 
   const fetchProjects = useCallback(async () => {
     if (projectId || !companyId) return;
@@ -247,13 +261,54 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
   }, [fetchStages]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  const tasks = data.tasks.filter((t) => stages.some((s) => s.id === t.stageId));
   const [reordering, setReordering] = useState(false);
   const activeProjectId = projectId ?? project;
+  const companyRole = useAuthStore((s) => s.companyRole);
+  const canMutateTasks = !companyRole || canAccess(companyRole, 'tasks-mutate');
+  const attentionTasks = tasks
+    .filter((t) => isTaskOverdue(t.endDate, t.status))
+    .sort((a, b) => (a.endDate ?? '').localeCompare(b.endDate ?? ''))
+    .slice(0, 5);
+  const tasksByStage = (stageId: string) => tasks.filter((t) => t.stageId === stageId);
+
+  const fetchTasks = useCallback(async () => {
+    if (!companyId || !activeProjectId || !stages.length) {
+      setTasks([]);
+      setUpdates([]);
+      return;
+    }
+    setLoadingTasks(true);
+    try {
+      const perStage = await Promise.all(
+        stages.map((s) => getStageTasks(companyId, activeProjectId, s.id).catch(() => [] as ApiTask[])),
+      );
+      const all = perStage.flat();
+      setTasks(all);
+      const [parties, perTaskUpdates] = await Promise.all([
+        getParties(companyId).catch(() => []),
+        Promise.all(
+          all.map((t) => getTaskUpdates(companyId, activeProjectId, t.stageId, t.id).catch(() => [] as ApiTaskUpdate[])),
+        ),
+      ]);
+      setPartyNames(new Map(parties.map((p) => [p.id, p.name])));
+      setUpdates(perTaskUpdates.flat().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)));
+    } catch {
+      setTasks([]);
+      setUpdates([]);
+    } finally {
+      setLoadingTasks(false);
+    }
+  }, [companyId, activeProjectId, stages]);
+
+  /* eslint-disable react-hooks/set-state-in-effect -- project task aggregation load on stages change */
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <>
-      <PageHeader title="Construction" description="Track project stages, tasks, and current site activity.">
+      <PageHeader title="Construction" eyebrow="Workspace / Construction" description="Track project stages, tasks, and current site activity.">
         {!projectId && (
           <select
             className="filter-select"
@@ -278,14 +333,23 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
             New Stage
           </ButtonLink>
         )}
-        <ButtonLink href="/app/tasks/new">
-          <Plus size={15} />
-          New Task
-        </ButtonLink>
+        {canMutateTasks && (
+          <ButtonLink href="/app/tasks/new">
+            <Plus size={15} />
+            New Task
+          </ButtonLink>
+        )}
       </PageHeader>
       <div className="stats">
-        <StatCard label="Active Stages" value={stages.filter((s) => s.status === 'IN_PROGRESS').length} />
-        <StatCard label="Total Stages" value={stages.length} detail="In this project" />
+        <StatCard label="Active Stages" value={stages.filter((s) => s.status === 'IN_PROGRESS').length} icon={<Layers size={14} />} />
+        <StatCard label="Tasks In Progress" value={tasks.filter((t) => t.status === 'IN_PROGRESS').length} icon={<ClipboardList size={14} />} />
+        <StatCard label="Completed Tasks" value={tasks.filter((t) => t.status === 'COMPLETED').length} icon={<CircleCheck size={14} />} />
+        <StatCard
+          label="Overdue Tasks"
+          value={tasks.filter((t) => isTaskOverdue(t.endDate, t.status)).length}
+          detail="Need attention"
+          icon={<TriangleAlert size={14} />}
+        />
       </div>
       <Panel
         title="Milestone Overview"
@@ -317,22 +381,33 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
           />
         ) : stages.length ? (
           <div className="stage-grid">
-            {stages.map((s) => (
-              <Link
-                href={'/app/construction/stages/' + s.id + '?projectId=' + (projectId ?? project)}
-                key={s.id}
-                className={'stage-card ' + (s.status === 'IN_PROGRESS' ? 'active' : '')}
-              >
-                <div className="eyebrow">Phase {String(s.order + 1).padStart(2, '0')}</div>
-                <Badge value={s.status} />
-                <h3>{s.name}</h3>
-                <small>
-                  {s.startDate ? displayDate(s.startDate) : '—'}
-                  <br />
-                  {s.endDate ? displayDate(s.endDate) : '—'}
-                </small>
-              </Link>
-            ))}
+            {stages.map((s) => {
+              const stageTasks = tasksByStage(s.id);
+              const done = stageTasks.filter((t) => t.status === 'COMPLETED').length;
+              const pct = stageTasks.length ? Math.round((done / stageTasks.length) * 100) : 0;
+              return (
+                <Link
+                  href={'/app/construction/stages/' + s.id + '?projectId=' + (projectId ?? project)}
+                  key={s.id}
+                  className={'stage-card ' + (s.status === 'IN_PROGRESS' ? 'active' : '')}
+                >
+                  <div className="eyebrow">Phase {String(s.order + 1).padStart(2, '0')}</div>
+                  <Badge value={s.status} />
+                  <h3>{s.name}</h3>
+                  <small>
+                    {s.startDate ? displayDate(s.startDate) : '—'}
+                    <br />
+                    {s.endDate ? displayDate(s.endDate) : '—'}
+                  </small>
+                  <small>
+                    {done} / {stageTasks.length} Tasks
+                  </small>
+                  <div className="section-space">
+                    <Progress value={pct} />
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         ) : (
           <EmptyState
@@ -342,31 +417,45 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
           />
         )}
       </Panel>
-      <div className="section-space">
-        <h2 style={{ marginBottom: 16 }}>Tasks Requiring Attention</h2>
-        <TasksTable rows={tasks} />
-      </div>
       <div className="two-column section-space">
+        <Panel title="Tasks Requiring Attention" subtitle="Overdue tasks by nearest due date">
+          {loadingTasks ? (
+            <p className="small" role="status" aria-live="polite">
+              Loading tasks…
+            </p>
+          ) : !attentionTasks.length ? (
+            <p className="small">No tasks require attention.</p>
+          ) : (
+            <TaskTableReal
+              rows={attentionTasks}
+              sessionUser={sessionUser}
+              partyNames={partyNames}
+              membersByUserId={membersByUserId}
+            />
+          )}
+        </Panel>
         <Panel title="Recent Task Updates">
-          {data.updates
-            .filter((u) => tasks.some((t) => t.id === u.taskId))
-            .map((u) => (
+          {loadingTasks ? (
+            <p className="small" role="status" aria-live="polite">
+              Loading updates…
+            </p>
+          ) : !updates.length ? (
+            <p className="small">No updates logged yet.</p>
+          ) : (
+            updates.slice(0, 8).map((u) => (
               <div key={u.id} className="activity">
                 <span className="activity-dot" />
                 <div>
-                  <strong>Omar Saleh</strong>
-                  <time>{displayDate(u.date)}</time>
+                  <strong>
+                    {resolveUpdateAuthorName(u.userId, membersByUserId, sessionUser)}
+                  </strong>
+                  <time>{displayDate(u.createdAt)}</time>
                   <p>Updated progress to {u.progress}%</p>
                   <p>{u.notes}</p>
                 </div>
               </div>
-            ))}
-        </Panel>
-        <Panel title="Active Worksite Anchor">
-          <img src="/images/6f8d06409fc0.webp" alt="Construction site" style={{ height: 170, width: '100%', borderRadius: 8 }} />
-          <p className="small section-space">
-            Concrete pouring and reinforcement focused on floor framing. Coordinate field inspections with the site supervisor.
-          </p>
+            ))
+          )}
         </Panel>
       </div>
     </>
@@ -375,8 +464,8 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
 
 /**
  * Real stage detail. The project is resolved from ?projectId= when
- * present, otherwise by traversing the company's projects. Task
- * sections stay mock-driven until the tasks task.
+ * present, otherwise by traversing the company's projects. Tasks render
+ * through the real StageTasksSection below with the live count.
  */
 export function StageWorkspaceDetail({ id }: { id: string }) {
   const companyId = useCompanyId();
@@ -391,7 +480,7 @@ export function StageWorkspaceDetail({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const { data } = useWorkspace();
+  const [taskCount, setTaskCount] = useState(0);
 
   const fetchDetail = useCallback(async () => {
     if (!companyId) {
@@ -456,7 +545,6 @@ export function StageWorkspaceDetail({ id }: { id: string }) {
     return <ListError message={error ?? 'Stage not found.'} onRetry={fetchDetail} />;
   }
 
-  const tasks = data.tasks.filter((t) => t.stageId === id);
   return (
     <>
       <PageHeader title={stage.name} description="Manage tasks and timeline for this construction stage." back="/app/construction">
@@ -472,7 +560,7 @@ export function StageWorkspaceDetail({ id }: { id: string }) {
             Delete Stage
           </button>
         )}
-        <ButtonLink href="/app/tasks/new">
+        <ButtonLink href={`/app/tasks/new?projectId=${projectId}&stageId=${id}`}>
           <Plus size={15} />
           New Task
         </ButtonLink>
@@ -481,13 +569,22 @@ export function StageWorkspaceDetail({ id }: { id: string }) {
         <StatCard label="Order Index" value={String(stage.order + 1).padStart(2, '0')} />
         <StatCard label="Start Date" value={stage.startDate ? displayDate(stage.startDate) : '—'} />
         <StatCard label="Due Date" value={stage.endDate ? displayDate(stage.endDate) : '—'} />
-        <StatCard label="Total Tasks" value={tasks.length} />
+        <StatCard label="Total Tasks" value={taskCount} />
       </div>
       <Panel title="Scope & Description">
         <p>{stage.description || 'No description provided.'}</p>
       </Panel>
       <div className="section-space">
-        <TasksTable rows={tasks} />
+        <h2 style={{ marginBottom: 16 }}>Stage Tasks</h2>
+        {companyId ? (
+          <StageTasksSection
+            companyId={companyId}
+            projectId={projectId}
+            stageId={id}
+            canMutate={canMutate}
+            onCount={setTaskCount}
+          />
+        ) : null}
       </div>
       <ConfirmDialog
         open={confirming}

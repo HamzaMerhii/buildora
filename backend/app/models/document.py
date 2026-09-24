@@ -17,11 +17,27 @@ class Document(Base):
     )
 
     project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"),
+        ForeignKey(
+            "projects.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
+    )
+
+    uploaded_by: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
         index=True,
     )
 
     name: Mapped[str] = mapped_column()
+
+    category: Mapped[Optional[str]] = mapped_column(
+        nullable=True,
+    )
 
     file_url: Mapped[str] = mapped_column()
 
@@ -29,16 +45,11 @@ class Document(Base):
         nullable=True,
     )
 
-    category: Mapped[Optional[str]] = mapped_column(
+    original_filename: Mapped[Optional[str]] = mapped_column(
         nullable=True,
     )
 
-    uploaded_by: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"),
-        index=True,
-    )
-
-    uploaded_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow,
     )
 

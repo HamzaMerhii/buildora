@@ -1,2 +1,2 @@
-import { PartiesList } from '@/components/features/Business';
-export default function Page(){return <PartiesList />;}
+import { PartiesWorkspaceList } from '@/components/features/PartiesApi';
+export default function Page(){return <PartiesWorkspaceList />;}

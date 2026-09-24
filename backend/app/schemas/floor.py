@@ -37,6 +37,7 @@ class FloorUpdate(BaseSchema):
 class FloorResponse(BaseSchema):
     id: UUID
     building_id: UUID
+
     name: Optional[str]
     floor_number: int
     description: Optional[str]

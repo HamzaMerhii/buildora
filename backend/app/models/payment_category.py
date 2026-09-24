@@ -17,10 +17,6 @@ class PaymentCategory(Base):
         unique=True,
     )
 
-    description: Mapped[str | None] = mapped_column(
-        nullable=True,
-    )
-
     payments = relationship(
         "Payment",
         back_populates="category",

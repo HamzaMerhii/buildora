@@ -1,2 +1,2 @@
-import { LeadsList } from '@/components/features/LeadsDocuments';
-export default function Page(){return <LeadsList />;}
+import { LeadsWorkspaceList } from '@/components/features/LeadsApi';
+export default function Page(){return <LeadsWorkspaceList />;}

@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { Building2, Lock } from 'lucide-react';
 import { buildingSchema } from '@/lib/validations/building.schema';
 import { floorApiSchema } from '@/lib/validations/floor.schema';
 import { landRecordSchema, landSchema } from '@/lib/validations/project.schema';
@@ -35,7 +36,7 @@ import {
 import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { useWorkspace } from '../features/WorkspaceProvider';
 import { PageHeader } from '../ui/Primitives';
-import { Field,Textarea,FormSection,FormActions } from './FormPrimitives';
+import { Field,Textarea,FormActions,NumberedSection } from './FormPrimitives';
 export function BuildingForm({projectId,id}:{projectId:string;id?:string}){
   const companyId = useAuthStore((s) => s.companyId);
   const {data,notify}=useWorkspace();
@@ -107,7 +108,7 @@ export function BuildingForm({projectId,id}:{projectId:string;id?:string}){
       }
       setBackendError(friendlyMessage(error));
     }
-  })}><FormSection title="Building Information"><Field name="name" label="Building Name *" placeholder="e.g. Building A or East Wing Block"/><Textarea name="description" label="Description (Optional)" placeholder="Main residential block facing the eastern entrance."/></FormSection>{backendError&&<p className="field-error" role="alert">{backendError}</p>}<FormActions onCancel={()=>router.push(back)} label={id?'Save Changes':'Add Building'} pending={form.formState.isSubmitting}/></form></FormProvider></div>;
+  })}><NumberedSection number={1} title="Building Information" micro="GENERAL"><Field name="name" label="Building Name *" placeholder="e.g. Building A or East Wing Block"/><Textarea name="description" label="Description (Optional)" placeholder="Main residential block facing the eastern entrance."/></NumberedSection>{backendError&&<p className="field-error" role="alert">{backendError}</p>}<FormActions onCancel={()=>router.push(back)} label={id?'Save Changes':'Add Building'} pending={form.formState.isSubmitting}/></form></FormProvider></div>;
 }
 export function FloorForm({buildingId,id}:{buildingId:string;id?:string}){
   const searchParams = useSearchParams();
@@ -199,7 +200,7 @@ export function FloorForm({buildingId,id}:{buildingId:string;id?:string}){
     return <><p className="field-error" role="alert">{parentError ?? recordError ?? 'Floor not found.'}</p><p className="section-space"><Link href="/app/projects">Back to Projects</Link></p></>;
   }
 
-  return <div className="form-layout"><PageHeader title={id?'Edit Floor':'Add Floor'} description={'Define a floor within '+(parentName??'this building')} back={back}/><div className="form-note">Parent Structural Enclosure · {parentName??'Unknown building'}</div><FormProvider {...form}><form noValidate onSubmit={form.handleSubmit(async (v)=>{
+  return <div className="form-layout"><PageHeader title={id?'Edit Floor':'Add Floor'} description={(id?'Define the floor within ':'Add a floor to ')+(parentName??'this building')} back={back}>{parentName&&<div className="target-card"><small>TARGET STRUCTURE</small><strong><span className="navy-icon" aria-hidden="true"><Building2 size={14}/></span>{parentName}</strong></div>}</PageHeader><FormProvider {...form}><form noValidate onSubmit={form.handleSubmit(async (v)=>{
     if (!companyId || !parentProjectId) {
       setBackendError('Building context is not available.');
       return;
@@ -225,7 +226,7 @@ export function FloorForm({buildingId,id}:{buildingId:string;id?:string}){
       }
       setBackendError(friendlyMessage(error));
     }
-  })}><FormSection title="Floor Specification"><div className="form-grid"><Field name="name" label="Floor Name" placeholder="e.g. Floor 3"/><Field name="number" label="Floor Number *" type="number" step="1" placeholder="3"/></div><Textarea name="description" label="Optional Description / Notes"/></FormSection>{backendError&&<p className="field-error" role="alert">{backendError}</p>}<FormActions onCancel={()=>router.push(back)} label={id?'Save Changes':'Add Floor'} pending={form.formState.isSubmitting}/></form></FormProvider></div>;
+  })}><NumberedSection number={1} title="Floor Specification" micro="STRUCTURE" description="Define the floor identity and ordering within the selected building."><div className="locked-ref"><span style={{flex:1}}><small>Parent Structural Enclosure</small><strong style={{display:'flex',alignItems:'center',gap:8}}><span className="navy-icon" aria-hidden="true"><Building2 size={14}/></span>{parentName??'Unknown building'}</strong><small>Floors are created within this selected building.</small></span><span className="locked-chip"><Lock size={12} aria-hidden="true"/>LOCKED REFERENCE</span></div><div className="form-grid"><Field name="name" label="Floor Name" placeholder="e.g. Floor 3 or Ground Floor" hint="Appears across project structure and apartment organization."/><Field name="number" label="Floor Number *" type="number" step="1" placeholder="3" hint="Ordered sequence integer used for floor indexing."/></div><div className="section-space"><Textarea name="description" label="Optional Description / Notes" placeholder="e.g. Typical residential floor with apartment layouts."/><small>Add structural, access, or planning notes for this floor.</small></div></NumberedSection>{backendError&&<p className="field-error" role="alert">{backendError}</p>}<FormActions onCancel={()=>router.push(back)} label={id?'Save Changes':'Add Floor'} pending={form.formState.isSubmitting}/></form></FormProvider></div>;
 }
 function LegacyLandForm({onClose}:{onClose:()=>void}){const {data,update,notify}=useWorkspace();const form=useForm<z.input<typeof landSchema>,unknown,z.output<typeof landSchema>>({resolver:zodResolver(landSchema),values:data.land,defaultValues:data.land});return <FormProvider {...form}><form noValidate onSubmit={form.handleSubmit(v=>{update({land:v});notify('Land information updated.');onClose();})}><div className="form-grid"><Field name="area" label="Land Area (sqm)" type="number"/><Field name="parcel" label="Parcel Number"/><Field name="maxHeight" label="Max Height (m)" type="number"/><Field name="ratio" label="Building Ratio (%)" type="number"/></div><div className="section-space"><Textarea name="constraints" label="Zoning & Regulatory Constraints"/></div><div className="section-space"><Textarea name="notes" label="Operational Notes"/></div><FormActions onCancel={onClose}/></form></FormProvider>;}
 

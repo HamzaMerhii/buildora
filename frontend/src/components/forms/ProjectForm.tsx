@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
-import { useForm, FormProvider } from 'react-hook-form';
+import { useForm, FormProvider, useFormContext } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
@@ -17,7 +17,7 @@ import {
 import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { useWorkspace } from '../features/WorkspaceProvider';
 import { PageHeader, EmptyState } from '../ui/Primitives';
-import { Field, Textarea, FormSection, FormActions } from './FormPrimitives';
+import { Field, Textarea, FormActions, NumberedSection } from './FormPrimitives';
 
 type FormInput = z.input<typeof projectSchema>;
 
@@ -85,6 +85,80 @@ function NewImagePicker({
         </div>
       )}
     </>
+  );
+}
+
+/** Card-based project status selector (radio semantics, same `status` field). */
+const PROJECT_STATUS_OPTIONS = [
+  { value: 'PLANNING', title: 'Planning', description: 'Recommended for design and permit review', dot: '#6366f1' },
+  { value: 'IN_PROGRESS', title: 'In Progress', description: 'Active site mobilization and works', dot: '#f59e0b' },
+  { value: 'ON_HOLD', title: 'On Hold', description: 'Awaiting clearances, financing, or restart', dot: '#94a3b8' },
+  { value: 'COMPLETED', title: 'Completed', description: 'Final handover and project completion', dot: '#22c55e' },
+] as const;
+
+function ProjectStatusCards() {
+  const { register, watch, formState: { errors } } = useFormContext();
+  const value = watch('status') as string | undefined;
+  const [focused, setFocused] = useState<string | null>(null);
+  const error = errors.status?.message;
+  return (
+    <div className="field">
+      <span style={{ fontSize: 10, letterSpacing: '.08em', color: 'var(--muted)', textTransform: 'uppercase' }}>
+        Initial Project Status
+      </span>
+      <div className="status-cards" role="radiogroup" aria-label="Initial project status">
+        {PROJECT_STATUS_OPTIONS.map((o) => {
+          const selected = value === o.value;
+          return (
+            <label
+              key={o.value}
+              style={{
+                display: 'flex', flexDirection: 'column', gap: 8, padding: 16, borderRadius: 10,
+                border: selected ? '1.5px solid var(--amber)' : '1px solid var(--line)',
+                background: selected ? '#f59e0b14' : '#fff', cursor: 'pointer',
+                transition: 'border-color .15s, background .15s',
+                outline: focused === o.value ? '2px solid var(--amber)' : 'none', outlineOffset: 3,
+                minHeight: 118,
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span
+                  aria-hidden="true"
+                  style={{ width: 12, height: 12, borderRadius: '50%', background: selected ? o.dot : '#c0c6db' }}
+                />
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 18, height: 18, borderRadius: '50%',
+                    border: selected ? '1.5px solid var(--amber)' : '1.5px solid #c0c6db',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    background: '#fff', flexShrink: 0,
+                  }}
+                >
+                  {selected && <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--amber)' }} />}
+                </span>
+                <input
+                  type="radio"
+                  value={o.value}
+                  {...register('status')}
+                  onFocus={() => setFocused(o.value)}
+                  onBlur={() => setFocused(null)}
+                  aria-label={o.title}
+                  style={{ position: 'absolute', opacity: 0, width: 1, height: 1 }}
+                />
+              </span>
+              <strong style={{ fontSize: 13 }}>{o.title}</strong>
+              <small style={{ color: 'var(--muted)', lineHeight: 1.5 }}>{o.description}</small>
+            </label>
+          );
+        })}
+      </div>
+      {error && (
+        <p className="field-error" role="alert">
+          {String(error)}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -245,29 +319,29 @@ export function ProjectForm({ id }: { id?: string }) {
             }
           })}
         >
-          <FormSection title="Project Information" description="Core project identity and scope">
+          <NumberedSection number={1} title="Project Information" micro="GENERAL" description="Core project identity and scope">
             <Field name="name" label="Project Name *" placeholder="e.g. Cedar Residence" />
             <Textarea
               name="description"
               label="Description"
               placeholder="Construction scope, architectural style, and delivery goals…"
             />
-          </FormSection>
-          <FormSection title="Location" description="Physical construction site">
+          </NumberedSection>
+          <NumberedSection number={2} title="Location" micro="SITE" description="Physical construction site">
             <Field
               name="location"
               label="Location / Site Address *"
               placeholder="e.g. Beirut, Lebanon (Plot 4412/Achrafieh)"
             />
-          </FormSection>
-          <FormSection title="Timeline" description="Planned project delivery window">
+          </NumberedSection>
+          <NumberedSection number={3} title="Timeline" micro="SCHEDULE" description="Planned project delivery window">
             <div className="form-grid">
               <Field name="startDate" label="Start Date *" type="date" />
               <Field name="endDate" label="Expected End Date *" type="date" />
             </div>
-          </FormSection>
+          </NumberedSection>
           {id ? (
-            <FormSection title="Budget & Currency">
+            <NumberedSection number={4} title="Budget & Currency" micro="FINANCIALS">
               <div className="form-grid">
                 <Field
                   name="budget"
@@ -285,9 +359,9 @@ export function ProjectForm({ id }: { id?: string }) {
                   <option value="SAR">SAR</option>
                 </Field>
               </div>
-            </FormSection>
+            </NumberedSection>
           ) : (
-            <FormSection title="Budget" description="Total approved project budget in USD">
+            <NumberedSection number={4} title="Budget" micro="FINANCIALS" description="Total approved project budget in USD">
               <Field
                 name="budget"
                 label="Total Approved Budget *"
@@ -295,19 +369,21 @@ export function ProjectForm({ id }: { id?: string }) {
                 step="any"
                 placeholder="500000"
               />
-            </FormSection>
+            </NumberedSection>
           )}
-          <FormSection title="Status" description="Current project operational stage">
-            <Field name="status" label="Project Status">
-              <option value="PLANNING">Planning — Permits & design</option>
-              <option value="IN_PROGRESS">In Progress — Active site works</option>
-              <option value="ON_HOLD">On Hold — Paused temporarily</option>
-              <option value="COMPLETED">Completed — Handed over</option>
-            </Field>
-          </FormSection>
+          <NumberedSection
+            number={5}
+            title="Status"
+            micro="LIFECYCLE"
+            description="Set the workflow gate for resource planning and subcontractor dispatch."
+          >
+            <ProjectStatusCards />
+          </NumberedSection>
           {!id && (
-            <FormSection
+            <NumberedSection
+              number={6}
               title="Project Image"
+              micro="MEDIA"
               description="Optional cover image for the new project. JPEG, PNG or WEBP."
             >
               <NewImagePicker
@@ -319,11 +395,13 @@ export function ProjectForm({ id }: { id?: string }) {
                 onSelect={handleImageChange}
                 onRemove={removeImage}
               />
-            </FormSection>
+            </NumberedSection>
           )}
           {id && (
-            <FormSection
+            <NumberedSection
+              number={6}
               title="Project Image"
+              micro="MEDIA"
               description="Current cover image and optional replacement. JPEG, PNG or WEBP."
             >
               {currentImage && (
@@ -345,7 +423,7 @@ export function ProjectForm({ id }: { id?: string }) {
                 onSelect={handleImageChange}
                 onRemove={removeImage}
               />
-            </FormSection>
+            </NumberedSection>
           )}
           {backendError && (
             <p className="field-error" role="alert">

@@ -13,7 +13,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
         <Link className="public-brand" href="/">
           <img src="/images/f049f3d28ba1.webp" alt="" />
           <span>
-            Cedar Construction<small>ENGINEERED FOR GENERATIONS</small>
+            Buildora<small>ENGINEERED FOR GENERATIONS</small>
           </span>
         </Link>
         <button
@@ -48,7 +48,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
       <footer className="public-footer">
         <div>
           <Link className="public-brand" href="/">
-            Cedar Construction
+            Buildora
           </Link>
           <p>
             Precision engineering. Lasting spaces.
@@ -63,13 +63,13 @@ export function PublicShell({ children }: { children: ReactNode }) {
         </div>
         <div>
           <strong>Connect</strong>
-          <a href="mailto:info@cedarconstruction.com">
-            info@cedarconstruction.com
+          <a href="mailto:info@buildora.com">
+            info@buildora.com
           </a>
           <a href="tel:+9611555220">+961 1 555 220</a>
           <Link href="/sign-in">Workspace sign in</Link>
         </div>
-        <small>© 2026 Cedar Construction. All rights reserved.</small>
+        <small>© 2026 Buildora. All rights reserved.</small>
       </footer>
     </div>
   );

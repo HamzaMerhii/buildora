@@ -87,4 +87,8 @@ class User(Base):
     "Task",
     back_populates="assignee",
     foreign_keys="Task.assigned_to",
+    )
+    uploaded_documents = relationship(
+    "Document",
+    back_populates="uploader",
 )

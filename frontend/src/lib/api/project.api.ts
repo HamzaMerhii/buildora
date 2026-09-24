@@ -53,6 +53,10 @@ export interface BackendProject {
   status: BackendProjectStatus;
   budget: string | number | null;
   image: string | null;
+  // Present only if the backend includes it: ProjectResponse currently
+  // omits progress_percent, so this arrives as undefined until the
+  // backend exposes it (reported, not changed here).
+  progress_percent?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -70,6 +74,9 @@ export interface ApiProject {
   budget: number | null;
   status: FrontendProjectStatus;
   image?: string;
+  // Real persisted percentage (projects.progress_percent, 0-100).
+  // Null when the backend response omits it — 0 is a real value.
+  progressPercent: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,6 +100,10 @@ export function mapProjectResponseToFrontend(p: BackendProject): ApiProject {
     budget: toNumberOrNull(p.budget),
     status: fromBackendStatus(p.status),
     image: p.image ?? undefined,
+    progressPercent:
+      typeof p.progress_percent === 'number' && Number.isFinite(p.progress_percent)
+        ? p.progress_percent
+        : null,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
   };

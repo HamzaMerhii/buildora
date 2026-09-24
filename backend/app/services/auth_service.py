@@ -19,7 +19,7 @@ from app.services.email_service import (
 )
 from app.models import Company, CompanyMembership, User, PlatformRole, user
 from app.schemas import UserCreateSchema
-from app.schemas.auth import UserLoginSchema
+from app.schemas.auth import ChangePasswordSchema, UserLoginSchema
 
 FORGOT_PASSWORD_MESSAGE = (
     "If an account with that email exists, "
@@ -83,7 +83,7 @@ def register_user(
 def login_user(
     email: str,
     password: str,
-    db: Session
+    db: Session,
 ):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -117,10 +117,27 @@ def login_user(
     ):
         raise credentials_exception
 
-    print("LOGIN USER:")
-    print("ID:", user.id)
-    print("EMAIL:", user.email)
-    print("TOKEN CREATED FOR:", user.id)
+    # SUPER_ADMIN is platform-level and does not depend on a company
+    if user.platform_role != PlatformRole.SUPER_ADMIN:
+        active_company = db.scalar(
+            select(Company)
+            .join(
+                CompanyMembership,
+                CompanyMembership.company_id == Company.id,
+            )
+            .where(
+                CompanyMembership.user_id == user.id,
+                CompanyMembership.is_active.is_(True),
+                Company.is_active.is_(True),
+            )
+            .limit(1)
+        )
+
+        if active_company is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not belong to an active company",
+            )
 
     access_token = create_access_token(
         str(user.id),
@@ -131,7 +148,6 @@ def login_user(
         "access_token": access_token,
         "token_type": "bearer",
     }
-
 
 def get_session_context(
     current_user: User,
@@ -267,3 +283,33 @@ def reset_password(
     return {
         "message": "Password reset successfully"
     }
+
+def change_password(
+    current_user: User,
+    payload: ChangePasswordSchema,
+    db: Session,
+):
+    if not verify_password(
+        payload.current_password,
+        current_user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+
+    if verify_password(
+        payload.new_password,
+        current_user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from current password",
+        )
+
+    current_user.password = hash_password(
+        payload.new_password
+    )
+
+    db.commit()
+    db.refresh(current_user)

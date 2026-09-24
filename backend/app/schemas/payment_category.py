@@ -1,18 +1,18 @@
-from typing import Optional
+from datetime import datetime
 from uuid import UUID
+
+from pydantic import Field
 
 from app.schemas.base import BaseSchema
 
-
 class PaymentCategoryCreate(BaseSchema):
-    name: str
-    description: Optional[str] = None
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+    )
 
 
-class PaymentCategoryUpdate(BaseSchema):
-    name: Optional[str] = None
-    description: Optional[str] = None
-
-
-class PaymentCategoryResponse(PaymentCategoryCreate):
+class PaymentCategoryResponse(BaseSchema):
     id: UUID
+    name: str

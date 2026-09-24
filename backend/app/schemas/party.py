@@ -36,14 +36,18 @@ class PartyUpdate(BaseSchema):
         max_length=200,
     )
 
-    type: Optional[PartyType] = None
-
-    email: Optional[EmailStr] = None
+    type: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=50,
+    )
 
     phone: Optional[str] = Field(
         default=None,
         max_length=30,
     )
+
+    email: Optional[EmailStr] = None
 
     address: Optional[str] = None
 

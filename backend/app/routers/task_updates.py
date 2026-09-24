@@ -22,7 +22,10 @@ from app.schemas.task_update import (
     TaskUpdateResponse,
 )
 from app.services.imagekit_service import upload_task_update_image
-from app.services.task_update_service import create_task_update
+from app.services.task_update_service import (
+    create_task_update,
+    get_task_updates,
+    get_task_update_details)
 
 
 router = APIRouter(
@@ -37,11 +40,7 @@ router = APIRouter(
 )
 
 
-@router.post(
-    "/",
-    response_model=TaskUpdateResponse,
-    status_code=status.HTTP_201_CREATED,
-)
+
 @router.post(
     "/",
     response_model=TaskUpdateResponse,
@@ -90,3 +89,47 @@ async def create_new_task_update(
         current_user=current_user,
         photo_url=photo_url,
     )
+
+
+@router.get(
+    "/",
+    response_model=list[TaskUpdateResponse],
+)
+def list_task_updates(
+    company_id: UUID,
+    project_id: UUID,
+    stage_id: UUID,
+    task_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_site_management),
+):
+    return get_task_updates(
+        company_id=company_id,
+        project_id=project_id,
+        stage_id=stage_id,
+        task_id=task_id,
+        db=db,
+    )
+
+@router.get(
+    "/{update_id}",
+    response_model=TaskUpdateResponse,
+)
+def get_task_update(
+    company_id: UUID,
+    project_id: UUID,
+    stage_id: UUID,
+    task_id: UUID,
+    update_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_site_management),
+):
+    return get_task_update_details(
+        company_id=company_id,
+        project_id=project_id,
+        stage_id=stage_id,
+        task_id=task_id,
+        update_id=update_id,
+        db=db,
+    )
+

@@ -41,10 +41,6 @@ class Payment(Base):
         Numeric(14, 2)
     )
 
-    currency: Mapped[str] = mapped_column(
-        default="USD",
-    )
-
     payment_date: Mapped[date] = mapped_column()
 
     description: Mapped[Optional[str]] = mapped_column(

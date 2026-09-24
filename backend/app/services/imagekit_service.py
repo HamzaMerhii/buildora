@@ -10,7 +10,18 @@ COMPANY_LOGO_FOLDER = "/companies/logos/"
 PROJECT_IMAGE_FOLDER = "/projects/images/"
 APARTMENT_IMAGE_FOLDER = "/apartments/images/"
 TASK_UPDATE_IMAGE_FOLDER = "/task-updates"
+DOCUMENT_FILE_FOLDER = "/documents"
 
+ALLOWED_DOCUMENT_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
 ALLOWED_IMAGE_MIME_TYPES = {
     "image/jpeg",
     "image/png",
@@ -93,7 +104,31 @@ async def _upload_image(file: UploadFile, *, folder: str, kind: str) -> str:
 
     return url
 
+async def _upload_file(
+    file: UploadFile,
+    folder: str,
+    kind: str,
+) -> str:
+    if file.content_type not in ALLOWED_DOCUMENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Unsupported document file type. "
+                "Allowed types: PDF, DOC, DOCX, XLS, XLSX, JPEG, PNG, WEBP"
+            ),
+        )
 
+    file_bytes = await file.read()
+
+    imagekit = get_imagekit_client()
+
+    result = imagekit.files.upload(
+        file=file_bytes,
+        file_name=file.filename or "document",
+        folder=folder,
+    )
+
+    return result.url
 async def upload_company_logo(logo: UploadFile) -> str:
     return await _upload_image(logo, folder=COMPANY_LOGO_FOLDER, kind="company logo")
 
@@ -110,4 +145,13 @@ async def upload_task_update_image(image: UploadFile) -> str:
         image,
         folder=TASK_UPDATE_IMAGE_FOLDER,
         kind="task update image",
+    )
+DOCUMENT_FILE_FOLDER = "/documents"
+
+
+async def upload_document_file(file: UploadFile) -> str:
+    return await _upload_file(
+        file,
+        folder=DOCUMENT_FILE_FOLDER,
+        kind="document file",
     )

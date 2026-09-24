@@ -34,6 +34,7 @@ interface AuthState {
   login: (token: string) => void;
   logout: () => void;
   setHasHydrated: (value: boolean) => void;
+  setCompanyName: (name: string) => void;
   fetchSession: () => Promise<SessionContext>;
 }
 
@@ -68,6 +69,7 @@ export const useAuthStore = create<AuthState>()(
           sessionStatus: 'idle' as SessionStatus,
         }),
       setHasHydrated: (value: boolean) => set({ hasHydrated: value }),
+      setCompanyName: (name: string) => set({ companyName: name }),
       fetchSession: async () => {
         const { accessToken } = get();
         if (!accessToken) {

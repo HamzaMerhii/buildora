@@ -2,26 +2,32 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import EmailStr
+from pydantic import EmailStr,Field
 
 from app.schemas.base import BaseSchema
+from app.models.lead import LeadStatus
 
 
 class LeadCreate(BaseSchema):
-    apartment_id: UUID
-    name: str
-    phone: Optional[str] = None
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+    )
+
+    phone: Optional[str] = Field(
+        default=None,
+        max_length=30,
+    )
+
     email: Optional[EmailStr] = None
-    source: Optional[str] = None
+
     message: Optional[str] = None
 
 
 class LeadUpdate(BaseSchema):
-    name: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[EmailStr] = None
-    source: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[LeadStatus] = None
+
     message: Optional[str] = None
 
 
@@ -32,9 +38,9 @@ class LeadResponse(BaseSchema):
     name: str
     phone: Optional[str]
     email: Optional[EmailStr]
-    source: Optional[str]
-    status: str
     message: Optional[str]
+
+    status: LeadStatus
 
     created_at: datetime
     updated_at: datetime

@@ -91,7 +91,7 @@ class Apartment(Base):
     )
 
     leads = relationship(
-        "Lead",
-        back_populates="apartment",
-        cascade="all, delete-orphan",
+    "Lead",
+    back_populates="apartment",
+    cascade="all, delete-orphan",
     )

@@ -1,2 +1,2 @@
-import { LeadDetail } from '@/components/features/LeadsDocuments';
-export default async function Page({params}:{params:Promise<{id:string}>}){const {id}=await params;return <LeadDetail id={id} statusInitially/>;}
+import { LeadWorkspaceDetail } from '@/components/features/LeadsApi';
+export default async function Page({params}:{params:Promise<{id:string}>}){const {id}=await params;return <LeadWorkspaceDetail id={id} statusInitially/>;}

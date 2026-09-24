@@ -83,7 +83,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
   return <>
     <div className="eyebrow">Secure Password Reset</div>
     <h1>Create a new password</h1>
-    <p>Choose a new password for your Cedar Construction account.</p>
+    <p>Choose a new password for your Buildora account.</p>
     <FormProvider {...form}>
       <form noValidate aria-busy={pending} onSubmit={form.handleSubmit(async values => {
         setError(null);

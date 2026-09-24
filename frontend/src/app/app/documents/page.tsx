@@ -1,2 +1,2 @@
-import { DocumentsList } from '@/components/features/LeadsDocuments';
-export default function Page(){return <DocumentsList />;}
+import { DocumentsWorkspaceList } from '@/components/features/DocumentsApi';
+export default function Page(){return <DocumentsWorkspaceList />;}

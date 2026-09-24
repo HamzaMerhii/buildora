@@ -6,13 +6,14 @@ from app.database.db import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.schemas import Token
-from app.schemas.auth import ForgotPasswordSchema, ResetPasswordSchema, SessionContextResponse, UserRegisterSchema
+from app.schemas.auth import ChangePasswordSchema, ForgotPasswordSchema, ResetPasswordSchema, SessionContextResponse, UserRegisterSchema
 from app.services.auth_service import (
     get_session_context,
     login_user,
     register_user,
     forgot_password,
     reset_password,
+    change_password
 )
 
 
@@ -83,3 +84,22 @@ def reset_password_route(
         data.new_password,
         db,
     )
+
+@router.post(
+    "/change-password",
+    status_code=status.HTTP_200_OK,
+)
+def change_current_user_password(
+    payload: ChangePasswordSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    change_password(
+        current_user=current_user,
+        payload=payload,
+        db=db,
+    )
+
+    return {
+        "message": "Password changed successfully"
+    }

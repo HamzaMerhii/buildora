@@ -9,7 +9,6 @@ from app.schemas.base import BaseSchema
 
 
 class PaymentCreate(BaseSchema):
-    project_id: UUID
     party_id: UUID
     category_id: UUID
 
@@ -18,10 +17,9 @@ class PaymentCreate(BaseSchema):
         gt=0,
     )
 
-    currency: str = "USD"
     payment_date: date
-
     description: Optional[str] = None
+
     reference: Optional[str] = None
 
 
@@ -40,8 +38,18 @@ class PaymentUpdate(BaseSchema):
     reference: Optional[str] = None
 
 
-class PaymentResponse(PaymentCreate):
+class PaymentResponse(BaseSchema):
     id: UUID
+    project_id: UUID
+
+    party_id: Optional[UUID]
+    category_id: Optional[UUID]
+
+    amount: Decimal
+    payment_date: date
+    description: Optional[str]
+    reference: Optional[str] = None
     created_by: UUID
+
     created_at: datetime
     updated_at: datetime

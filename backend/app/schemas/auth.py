@@ -70,3 +70,15 @@ class SessionContextResponse(BaseSchema):
     email: EmailStr
     platform_role: PlatformRole
     memberships: list[AuthMembershipContext] = []
+
+
+class ChangePasswordSchema(BaseModel):
+    current_password: str = Field(
+        ...,
+        min_length=8,
+    )
+
+    new_password: str = Field(
+        ...,
+        min_length=8,
+    )

@@ -19,6 +19,7 @@ import { money } from '@/lib/utils/format';
 import {
   PageHeader,
   ButtonLink,
+  StatCard,
   Badge,
   Panel,
   TextLink,
@@ -28,7 +29,6 @@ import {
 import { DataTable } from '../ui/DataTable';
 
 const FALLBACK_IMAGE = '/images/33b403bb7596.webp';
-const FLOOR_PLAN_IMAGE = '/images/c697c8220da9.webp';
 
 function ListError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
@@ -43,24 +43,101 @@ function ListError({ message, onRetry }: { message: string; onRetry: () => void 
   );
 }
 
+function AvailabilityDonut({
+  available,
+  reserved,
+  sold,
+  total,
+}: {
+  available: number;
+  reserved: number;
+  sold: number;
+  total: number;
+}) {
+  const radius = 54;
+  const circumference = 2 * Math.PI * radius;
+  const segments = [
+    { label: 'Available', value: available, color: '#22c55e' },
+    { label: 'Reserved', value: reserved, color: '#f59e0b' },
+    { label: 'Sold', value: sold, color: '#64748b' },
+  ];
+  let offset = 0;
+  const pct = (v: number) => (total > 0 ? Math.round((v / total) * 100) : 0);
+  return (
+    <div className="donut-wrap">
+      <div className="donut-chart">
+        <svg width="140" height="140" viewBox="0 0 140 140" role="img" aria-label={`Availability: ${available} available, ${reserved} reserved, ${sold} sold, ${total} total`}>
+          <circle cx="70" cy="70" r={radius} fill="none" strokeWidth="18" stroke="var(--line)" />
+          {total > 0 &&
+            segments.map((s) => {
+              if (!s.value) return null;
+              const length = (s.value / total) * circumference;
+              const dashOffset = -offset;
+              offset += length;
+              return (
+                <circle
+                  key={s.label}
+                  cx="70"
+                  cy="70"
+                  r={radius}
+                  fill="none"
+                  strokeWidth="18"
+                  stroke={s.color}
+                  strokeDasharray={`${length} ${circumference - length}`}
+                  strokeDashoffset={dashOffset}
+                  transform="rotate(-90 70 70)"
+                  strokeLinecap="butt"
+                />
+              );
+            })}
+        </svg>
+        <div className="donut-center" aria-hidden="true">
+          <strong>{total}</strong>
+          <small>UNITS</small>
+        </div>
+      </div>
+      <ul className="donut-legend">
+        {segments.map((s) => (
+          <li key={s.label}>
+            <span className="donut-dot" style={{ background: s.color }} aria-hidden="true" />
+            <span>{s.label}</span>
+            <strong>
+              {s.value} ({pct(s.value)}%)
+            </strong>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ApartmentTable({
   rows,
   showProject,
   projectOptions,
+  buildingOptions,
   project,
+  building,
   onProjectChange,
+  onBuildingChange,
 }: {
   rows: ApiApartmentWithParents[];
   showProject: boolean;
   projectOptions: Array<{ id: string; name: string }>;
+  buildingOptions?: Array<{ id: string; name: string }>;
   project: string;
+  building?: string;
   onProjectChange?: (value: string) => void;
+  onBuildingChange?: (value: string) => void;
 }) {
   const [status, setStatus] = useState('');
   const [visibility, setVisibility] = useState('');
+  const buildings = buildingOptions ?? [];
+  const activeBuilding = building ?? '';
   const filtered = rows.filter(
     (a) =>
       (!project || a.projectId === project) &&
+      (!activeBuilding || a.buildingId === activeBuilding) &&
       (!status || a.status === status) &&
       (!visibility || String(a.isPublic) === visibility),
   );
@@ -72,6 +149,16 @@ function ApartmentTable({
           {projectOptions.map((p) => (
             <option value={p.id} key={p.id}>
               {p.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {onBuildingChange && (
+        <select aria-label="Filter by building" value={activeBuilding} onChange={(e) => onBuildingChange(e.target.value)}>
+          <option value="">All Buildings</option>
+          {buildings.map((b) => (
+            <option value={b.id} key={b.id}>
+              {b.name}
             </option>
           ))}
         </select>
@@ -159,6 +246,7 @@ export function ApartmentsWorkspaceList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [project, setProject] = useState('');
+  const [building, setBuilding] = useState('');
 
   const fetchAll = useCallback(async () => {
     if (!companyId) {
@@ -194,6 +282,16 @@ export function ApartmentsWorkspaceList() {
   const projectOptions = [...new Map(rows.map((a) => [a.projectId, a.projectName ?? a.projectId])).entries()].map(
     ([id, name]) => ({ id, name }),
   );
+  const buildingOptions = [
+    ...new Map(
+      rows
+        .filter((a) => !project || a.projectId === project)
+        .map((a) => [a.buildingId, a.buildingName ?? a.buildingId]),
+    ).entries(),
+  ].map(([id, name]) => ({ id, name }));
+  const available = rows.filter((a) => a.status === 'AVAILABLE').length;
+  const reserved = rows.filter((a) => a.status === 'RESERVED').length;
+  const sold = rows.filter((a) => a.status === 'SOLD').length;
 
   return (
     <>
@@ -215,13 +313,32 @@ export function ApartmentsWorkspaceList() {
       ) : error ? (
         <ListError message={error} onRetry={fetchAll} />
       ) : (
-        <ApartmentTable
-          rows={rows}
-          showProject
-          projectOptions={projectOptions}
-          project={project}
-          onProjectChange={setProject}
-        />
+        <>
+          <div className="stats">
+            <StatCard label="Total Apartments" value={rows.length} />
+            <StatCard label="Available" value={available} detail="Ready for sale" />
+            <StatCard label="Reserved" value={reserved} detail="Awaiting completion" />
+            <StatCard label="Sold" value={sold} detail="Handed over" />
+          </div>
+          <ApartmentTable
+            rows={rows}
+            showProject
+            projectOptions={projectOptions}
+            buildingOptions={buildingOptions}
+            project={project}
+            building={building}
+            onProjectChange={(v) => {
+              setProject(v);
+              setBuilding('');
+            }}
+            onBuildingChange={setBuilding}
+          />
+          <div className="section-space">
+            <Panel title="Availability Split" subtitle="Company-wide inventory by status">
+              <AvailabilityDonut available={available} reserved={reserved} sold={sold} total={rows.length} />
+            </Panel>
+          </div>
+        </>
       )}
     </>
   );
@@ -415,11 +532,12 @@ export function ApartmentWorkspaceDetail({ id }: { id: string }) {
   const a = detail;
   const canMutate = !companyRole || canAccess(companyRole, 'apartments-mutate');
   const hero = a.images[0]?.url ?? FALLBACK_IMAGE;
+  const hierarchy = [a.projectName, a.buildingName, a.floorName].filter(Boolean).join(' • ');
   return (
     <>
       <PageHeader
         title={'Apartment ' + a.number}
-        description={(a.projectName ?? '') + (a.projectLocation ? ' · ' + a.projectLocation : '')}
+        description={hierarchy || 'Apartment details'}
         back="/app/apartments"
       >
         <Badge value={a.status} />
@@ -430,17 +548,32 @@ export function ApartmentWorkspaceDetail({ id }: { id: string }) {
           </ButtonLink>
         )}
       </PageHeader>
+      <div className="stats">
+        <StatCard label="Total Area" value={a.area === null ? '—' : a.area + ' sqm'} icon={<Square size={14} />} />
+        <StatCard label="Bedrooms" value={a.bedrooms === null ? '—' : a.bedrooms} icon={<BedDouble size={14} />} />
+        <StatCard label="Bathrooms" value={a.bathrooms === null ? '—' : a.bathrooms} icon={<Bath size={14} />} />
+        <StatCard label="Price" value={a.price === null ? '—' : money(a.price)} />
+        <StatCard label="Status" value={a.status} />
+      </div>
       <div className="two-column">
         <div className="stack">
-          <img className="hero-image" style={{ height: 390 }} src={hero} alt={'Interior of Apartment ' + a.number} />
-          {a.images.length > 1 && (
-            <div className="three-grid">
-              {a.images.slice(1).map((img) => (
-                <img key={img.id} src={img.url} alt={'Apartment ' + a.number + ' photo'} style={{ borderRadius: 8 }} />
-              ))}
+          <Panel title="Unit Profile">
+            <div className="eyebrow">Unit Profile</div>
+            <h3 className="section-space">Apartment {a.number}</h3>
+            <div>
+              <img className="hero-image" style={{ height: 390 }} src={hero} alt={'Interior of Apartment ' + a.number} />
+              <p className="small" style={{ marginTop: 8 }}>
+                {a.images.length ? 'Apartment Image' : 'No images uploaded yet'}
+              </p>
             </div>
-          )}
-          <Panel title="Physical Location Specifications">
+            {a.images.length > 1 && (
+              <div className="three-grid section-space">
+                {a.images.slice(1).map((img) => (
+                  <img key={img.id} src={img.url} alt={'Apartment ' + a.number + ' photo'} style={{ borderRadius: 8 }} />
+                ))}
+              </div>
+            )}
+            <p className="section-space">{a.description || 'No description provided.'}</p>
             <div className="unit-facts">
               <span>
                 <Square />
@@ -455,17 +588,17 @@ export function ApartmentWorkspaceDetail({ id }: { id: string }) {
                 {a.bathrooms === null ? '—' : a.bathrooms + ' Bathrooms'}
               </span>
             </div>
+          </Panel>
+          <Panel title="Physical Location Specifications">
             <DetailList
               items={[
-                ['Project', a.projectName],
-                ['Building', a.buildingName],
-                ['Floor', a.floorName],
-                ['Asking Price', a.price === null ? '—' : money(a.price)],
+                ['Project', <Link key="project" href={'/app/projects/' + a.projectId}>{a.projectName ?? '—'}</Link>],
+                ['Building', a.buildingName ?? '—'],
+                ['Floor', a.floorName ?? '—'],
+                ['Apartment Number', a.number],
+                ['Status', <Badge key="status" value={a.status} />],
               ]}
             />
-          </Panel>
-          <Panel title="Architectural Overview">
-            <p>{a.description || 'No description provided.'}</p>
           </Panel>
         </div>
         <div className="stack">
@@ -485,11 +618,14 @@ export function ApartmentWorkspaceDetail({ id }: { id: string }) {
               </button>
             )}
           </Panel>
-          <Panel title="Unit Floor Plan">
-            <img src={FLOOR_PLAN_IMAGE} alt="Apartment architectural floor plan" style={{ width: '100%', borderRadius: 8 }} />
-            <p className="small" style={{ marginTop: 12 }}>
-              Architectural layout · Unit {a.number}
-            </p>
+          <Panel title="Record Metadata">
+            <DetailList
+              items={[
+                ['Reference', id.slice(0, 8)],
+                ['Project', a.projectName ?? '—'],
+                ['Status', <Badge key="meta-status" value={a.status} />],
+              ]}
+            />
           </Panel>
           <Panel title={'Part of ' + (a.projectName ?? 'project')}>
             <p className="small">{a.projectDescription}</p>

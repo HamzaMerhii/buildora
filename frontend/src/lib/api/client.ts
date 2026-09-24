@@ -154,6 +154,68 @@ export async function apiForm<T>(
   return JSON.parse(text) as T;
 }
 
+export async function apiBlob(
+  path: string,
+  options: RequestOptions & { method?: string } = {},
+): Promise<{ blob: Blob; filename: string | null }> {
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path, options.query), {
+      method: options.method ?? 'GET',
+      headers: {
+        Accept: 'application/pdf,application/json',
+        ...authHeaders(options.auth),
+      },
+      signal: options.signal,
+    });
+  } catch {
+    throw new ApiError(0, 'Cannot reach the server. Check your connection and try again.');
+  }
+  if (!response.ok) throw await parseError(response);
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition');
+  const match = disposition?.match(/filename="([^"]+)"/);
+  return { blob, filename: match ? match[1] : null };
+}
+
+/**
+ * Raw binary fetch. Returns the ArrayBuffer untouched (never decoded
+ * as text/JSON) plus transport metadata for byte-level validation.
+ */
+export async function apiArrayBuffer(
+  path: string,
+  options: RequestOptions & { method?: string } = {},
+): Promise<{
+  buffer: ArrayBuffer;
+  filename: string | null;
+  contentType: string | null;
+  contentLength: string | null;
+}> {
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path, options.query), {
+      method: options.method ?? 'GET',
+      headers: {
+        Accept: 'application/pdf,application/json',
+        ...authHeaders(options.auth),
+      },
+      signal: options.signal,
+    });
+  } catch {
+    throw new ApiError(0, 'Cannot reach the server. Check your connection and try again.');
+  }
+  if (!response.ok) throw await parseError(response);
+  const buffer = await response.arrayBuffer();
+  const disposition = response.headers.get('Content-Disposition');
+  const match = disposition?.match(/filename="([^"]+)"/);
+  return {
+    buffer,
+    filename: match ? match[1] : null,
+    contentType: response.headers.get('Content-Type'),
+    contentLength: response.headers.get('Content-Length'),
+  };
+}
+
 export async function apiUrlEncoded<T>(
   path: string,
   values: Record<string, string>,

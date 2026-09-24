@@ -65,7 +65,7 @@ def create_task(
                 detail="Assigned user is not an active member of this company",
             )
 
-    # Validate party
+    # Validate assigned party
     if task.party_id is not None:
         party = db.scalar(
             select(Party).where(
@@ -148,6 +148,58 @@ def get_stage_tasks(
     ).all()
 
     return tasks
+
+
+def get_task_details(
+    company_id: UUID,
+    project_id: UUID,
+    stage_id: UUID,
+    task_id: UUID,
+    db: Session,
+):
+    # Verify project belongs to company
+    project = db.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.company_id == company_id,
+        )
+    )
+
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    # Verify stage belongs to project
+    stage = db.scalar(
+        select(ConstructionStage).where(
+            ConstructionStage.id == stage_id,
+            ConstructionStage.project_id == project_id,
+        )
+    )
+
+    if stage is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Construction stage not found",
+        )
+
+    # Verify task belongs to stage
+    task = db.scalar(
+        select(Task).where(
+            Task.id == task_id,
+            Task.stage_id == stage_id,
+        )
+    )
+
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
+
+    return task
 
 
 def update_task(
@@ -241,8 +293,7 @@ def update_task(
                     detail="Party does not belong to this company",
                 )
 
-    # Validate dates using the updated value when supplied,
-    # otherwise use the existing task value
+    # Get final dates after update
     start_date = update_data.get(
         "start_date",
         existing_task.start_date,
@@ -253,6 +304,7 @@ def update_task(
         existing_task.due_date,
     )
 
+    # Validate dates
     if (
         start_date is not None
         and due_date is not None
@@ -274,58 +326,6 @@ def update_task(
     db.refresh(existing_task)
 
     return existing_task
-
-
-def get_task_details(
-    company_id: UUID,
-    project_id: UUID,
-    stage_id: UUID,
-    task_id: UUID,
-    db: Session,
-):
-    # Verify project belongs to company
-    project = db.scalar(
-        select(Project).where(
-            Project.id == project_id,
-            Project.company_id == company_id,
-        )
-    )
-
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
-
-    # Verify stage belongs to project
-    stage = db.scalar(
-        select(ConstructionStage).where(
-            ConstructionStage.id == stage_id,
-            ConstructionStage.project_id == project_id,
-        )
-    )
-
-    if stage is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Construction stage not found",
-        )
-
-    # Verify task belongs to stage
-    task = db.scalar(
-        select(Task).where(
-            Task.id == task_id,
-            Task.stage_id == stage_id,
-        )
-    )
-
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found",
-        )
-
-    return task
 
 
 def delete_task(

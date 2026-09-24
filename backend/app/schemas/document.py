@@ -1,26 +1,34 @@
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
-
+from pydantic import Field
 from app.schemas.base import BaseSchema
 
 
 class DocumentCreate(BaseSchema):
-    project_id: UUID
-    name: str
-    file_url: str
-    file_type: Optional[str] = None
-    category: Optional[str] = None
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+    )
+
+    category: Optional[str] = Field(
+        default=None,
+        max_length=100,
+    )
 
 
-class DocumentUpdate(BaseSchema):
-    name: Optional[str] = None
-    file_url: Optional[str] = None
-    file_type: Optional[str] = None
-    category: Optional[str] = None
 
-
-class DocumentResponse(DocumentCreate):
+class DocumentResponse(BaseSchema):
     id: UUID
-    uploaded_by: UUID
-    uploaded_at: datetime
+    project_id: UUID
+    uploaded_by: Optional[UUID]
+
+    name: str
+    category: Optional[str]
+
+    file_url: str
+    file_type: Optional[str]
+    original_filename: Optional[str]
+
+    created_at: datetime

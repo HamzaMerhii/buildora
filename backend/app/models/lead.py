@@ -1,11 +1,18 @@
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import Enum as SQLEnum, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
+
+
+class LeadStatus(str, Enum):
+    NEW = "new"
+    CONTACTED = "contacted"
+    CLOSED = "closed"
 
 
 class Lead(Base):
@@ -17,7 +24,10 @@ class Lead(Base):
     )
 
     apartment_id: Mapped[UUID] = mapped_column(
-        ForeignKey("apartments.id", ondelete="CASCADE"),
+        ForeignKey(
+            "apartments.id",
+            ondelete="CASCADE",
+        ),
         index=True,
     )
 
@@ -31,16 +41,16 @@ class Lead(Base):
         nullable=True,
     )
 
-    source: Mapped[Optional[str]] = mapped_column(
-        nullable=True,
-    )
-
-    status: Mapped[str] = mapped_column(
-        default="new",
-    )
-
     message: Mapped[Optional[str]] = mapped_column(
         nullable=True,
+    )
+
+    status: Mapped[LeadStatus] = mapped_column(
+        SQLEnum(
+            LeadStatus,
+            name="leadstatus",
+        ),
+        default=LeadStatus.NEW,
     )
 
     created_at: Mapped[datetime] = mapped_column(

@@ -17,7 +17,6 @@ class TaskStatus(str, Enum):
 
 class Task(Base):
     __tablename__ = "tasks"
-    __tablename__ = "tasks"
 
     __table_args__ = (
         CheckConstraint(
@@ -42,9 +41,12 @@ class Task(Base):
     )
 
     assigned_to: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("users.id"),
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",),
         nullable=True,
         index=True,
+        
     )
 
     start_date: Mapped[Optional[date]] = mapped_column(

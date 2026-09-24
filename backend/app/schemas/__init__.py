@@ -12,3 +12,7 @@ from .user import UserUpdateByAdminSchema
 from .company import CompanyCreate
 from .company import CompanyUpdate
 from .company import CompanyResponse
+from .company import CompanyMemberResponse
+from .payment_category import PaymentCategoryCreate
+from .company import CompanyMemberCreate
+from .company import CompanyMemberUpdate

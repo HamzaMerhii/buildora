@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useForm, FormProvider, useWatch } from "react-hook-form";
+import { useForm, FormProvider, useFormContext, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useRouter } from "next/navigation";
@@ -30,10 +30,107 @@ import { ConfirmDialog } from "../ui/Dialog";
 import {
   Field,
   Textarea,
-  CheckField,
-  FormSection,
   FormActions,
+  NumberedSection,
 } from "./FormPrimitives";
+
+/** Card-based inventory status selector (radio semantics, same `status` field). */
+const APARTMENT_STATUS_OPTIONS = [
+  { value: 'AVAILABLE', title: 'Available', description: 'Available for assignment or sale.', dot: '#22c55e' },
+  { value: 'RESERVED', title: 'Reserved', description: 'Currently reserved.', dot: '#f59e0b' },
+  { value: 'SOLD', title: 'Sold', description: 'Marked as sold.', dot: '#64748b' },
+] as const;
+
+function ApartmentStatusCards() {
+  const { register, watch, formState: { errors } } = useFormContext();
+  const value = watch('status') as string | undefined;
+  const [focused, setFocused] = useState<string | null>(null);
+  const error = errors.status?.message;
+  return (
+    <div className="field">
+      <div className="status-cards status-cards-3" role="radiogroup" aria-label="Inventory status">
+        {APARTMENT_STATUS_OPTIONS.map((o) => {
+          const selected = value === o.value;
+          return (
+            <label
+              key={o.value}
+              style={{
+                display: 'flex', flexDirection: 'column', gap: 8, padding: 16, borderRadius: 10,
+                border: selected ? '1.5px solid var(--amber)' : '1px solid var(--line)',
+                background: selected ? '#f59e0b14' : '#fff', cursor: 'pointer',
+                transition: 'border-color .15s, background .15s',
+                outline: focused === o.value ? '2px solid var(--amber)' : 'none', outlineOffset: 3,
+                minHeight: 118,
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span
+                  aria-hidden="true"
+                  style={{ width: 12, height: 12, borderRadius: '50%', background: selected ? o.dot : '#c0c6db' }}
+                />
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 18, height: 18, borderRadius: '50%',
+                    border: selected ? '1.5px solid var(--amber)' : '1.5px solid #c0c6db',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    background: '#fff', flexShrink: 0,
+                  }}
+                >
+                  {selected && <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--amber)' }} />}
+                </span>
+                <input
+                  type="radio"
+                  value={o.value}
+                  {...register('status')}
+                  onFocus={() => setFocused(o.value)}
+                  onBlur={() => setFocused(null)}
+                  aria-label={o.title}
+                  style={{ position: 'absolute', opacity: 0, width: 1, height: 1 }}
+                />
+              </span>
+              <strong style={{ fontSize: 13 }}>{o.title}</strong>
+              <small style={{ color: 'var(--muted)', lineHeight: 1.5 }}>{o.description}</small>
+            </label>
+          );
+        })}
+      </div>
+      {error && (
+        <p className="field-error" role="alert">
+          {String(error)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Horizontal Public/Private switch bound to the real `isPublic` field. */
+function VisibilitySwitch() {
+  const { watch, setValue } = useFormContext();
+  const value = Boolean(watch('isPublic'));
+  return (
+    <div className="visibility-panel">
+      <span style={{ flex: 1 }}>
+        <strong style={{ display: 'block', fontSize: 13 }}>Website Visitor Display</strong>
+        <small style={{ color: 'var(--muted)' }}>
+          {value
+            ? 'Public — this apartment is shown on the public property catalog.'
+            : 'Private — this apartment stays inside your internal workspace.'}
+        </small>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        aria-label="Public visibility"
+        className={'switch' + (value ? ' on' : '')}
+        onClick={() => setValue('isPublic', !value, { shouldDirty: true, shouldValidate: true })}
+      >
+        <span aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
 
 interface EditChain {
   projectId: string;
@@ -372,7 +469,11 @@ export function ApartmentForm({ id }: { id?: string }) {
     <div className="form-layout">
       <PageHeader
         title={id ? "Edit Apartment" : "Create Apartment"}
-        description="Manage structural placement, unit specifications, and public listing visibility."
+        description={
+          id
+            ? "Update unit specifications, visibility, and photos."
+            : "Add a new apartment to the project structure with unit specifications."
+        }
         back="/app/apartments"
       />
       <FormProvider {...form}>
@@ -454,8 +555,9 @@ export function ApartmentForm({ id }: { id?: string }) {
             }
           })}
         >
-          <FormSection
-            title="1. Location in Structure"
+          <NumberedSection number="1"
+            title="Location in Structure"
+            micro="HIERARCHY"
             description="Asset placement within the project hierarchy"
           >
             {id && chain ? (
@@ -497,56 +599,60 @@ export function ApartmentForm({ id }: { id?: string }) {
                     ))}
                   </Field>
                 </div>
+                <p className="small section-space">
+                  Apartments must belong to a valid project, building, and floor hierarchy.
+                </p>
               </>
             )}
-          </FormSection>
-          <FormSection title="2. Apartment Information">
+          </NumberedSection>
+          <NumberedSection number="2" title="Apartment Information" micro="CORE IDENTIFIERS">
             <Field
               name="number"
               label="Apartment Number *"
               placeholder="e.g. 201"
+              hint="Unique unit identifier within the selected floor."
             />
-            <Textarea name="description" label="Description" />
-          </FormSection>
-          <FormSection title="3. Area & Rooms">
-            <Field
-              name="area"
-              label="Gross Area (sqm) *"
-              type="number"
-              step="any"
-            />
-            <div className="form-grid">
+            <div className="section-space">
+              <Textarea
+                name="description"
+                label="Description"
+                placeholder="e.g. Bright corner unit with balcony access…"
+              />
+            </div>
+          </NumberedSection>
+          <NumberedSection number="3" title="Area & Rooms" micro="METRICS">
+            <div className="apt-metrics">
+              <Field
+                name="area"
+                label="Area (sqm) *"
+                type="number"
+                step="any"
+              />
               <Field name="bedrooms" label="Bedrooms *" type="number" />
               <Field name="bathrooms" label="Bathrooms *" type="number" />
             </div>
-          </FormSection>
-          <FormSection title="4. Price & Valuation">
+          </NumberedSection>
+          <NumberedSection number="4" title="Price & Valuation" micro="FINANCIALS">
             <Field
               name="price"
-              label="Base Price (USD) *"
+              label="Base Price *"
               type="number"
               step="any"
             />
-          </FormSection>
-          <FormSection title="5. Inventory Status">
-            <Field name="status" label="Operational Status">
-              <option value="AVAILABLE">Available — Open inventory</option>
-              <option value="RESERVED">Reserved — Deposit received</option>
-              <option value="SOLD">Sold — Ownership transferred</option>
-            </Field>
-          </FormSection>
-          <FormSection title="6. Public Visibility">
-            <CheckField
-              name="isPublic"
-              label="Public — Show this apartment on the public property catalog"
-            />
-            <p className="small">
+          </NumberedSection>
+          <NumberedSection number="5" title="Inventory Status" micro="LIFECYCLE PHASE">
+            <ApartmentStatusCards />
+          </NumberedSection>
+          <NumberedSection number="6" title="Public Visibility" micro="VISIBILITY CONTROL">
+            <VisibilitySwitch />
+            <p className="small section-space">
               Private apartments are available only in your internal workspace.
             </p>
-          </FormSection>
+          </NumberedSection>
           {!id ? (
-            <FormSection
-              title="7. Apartment Images"
+            <NumberedSection number="7"
+              title="Apartment Images"
+              micro="MEDIA"
               description="Optional photos for the new apartment. JPEG, PNG or WEBP; you may select several."
             >
               <NewImagesPicker
@@ -558,11 +664,12 @@ export function ApartmentForm({ id }: { id?: string }) {
                 onSelect={handleImagesChange}
                 onRemove={removeImage}
               />
-            </FormSection>
+            </NumberedSection>
           ) : (
             <>
-              <FormSection
-                title="7. Apartment Images"
+              <NumberedSection number="7"
+                title="Apartment Images"
+                micro="MEDIA"
                 description="Current photos and new uploads. JPEG, PNG or WEBP; you may select several."
               >
                 {existingImages.length > 0 ? (
@@ -596,7 +703,7 @@ export function ApartmentForm({ id }: { id?: string }) {
                     onRemove={removeImage}
                   />
                 </div>
-              </FormSection>
+              </NumberedSection>
               <ConfirmDialog
                 open={pendingDeleteId !== null}
                 onClose={() => setPendingDeleteId(null)}

@@ -1,2 +1,2 @@
-import { Dashboard } from '@/components/features/Dashboard';
-export default function Page(){return <Dashboard role="finance"/>;}
+import { FinanceWorkspaceOverview } from '@/components/features/PaymentsApi';
+export default function Page(){return <FinanceWorkspaceOverview />;}
