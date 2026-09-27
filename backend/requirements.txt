@@ -10,3 +10,4 @@ imagekitio
 sendgrid
 fastapi-mail
 reportlab
+google-genai
