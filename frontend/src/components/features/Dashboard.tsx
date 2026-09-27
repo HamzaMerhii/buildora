@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Building2, DoorOpen, Contact, Wallet, ClipboardList } from 'lucide-react';
+import { Plus, Download, TriangleAlert, Building2, DoorOpen, Contact, Wallet, ClipboardList } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { canAccess, type ModuleKey } from '@/lib/auth/permissions';
-import { PageHeader, ButtonLink, StatCard, Badge, Progress, Panel, TextLink, EmptyState } from '../ui/Primitives';
+import { PageHeader, ButtonLink, StatCard, Badge, Progress, Panel, TextLink, EmptyState, DetailList } from '../ui/Primitives';
 import { DataTable } from '../ui/DataTable';
-import { displayDate } from '@/lib/utils/format';
+import { displayDate, exportCsv, money } from '@/lib/utils/format';
 import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { formatAmount } from '@/lib/api/payment.api';
 import {
+  financialKpiFontSize,
   getCompanyDashboardSummary,
   getCompanyDashboardTasks,
   getCompanySalesDashboard,
@@ -20,9 +21,19 @@ import {
   type ApiDashboardTask,
   type ApiSalesDashboard,
 } from '@/lib/api/dashboard.api';
-import { getProjects, type ApiProject } from '@/lib/api/project.api';
+import { getProjects, type ApiProject, type FrontendProjectStatus } from '@/lib/api/project.api';
+import { getStages } from '@/lib/api/construction-stage.api';
 import { getCompanyLeads, type ApiLead } from '@/lib/api/lead.api';
 import { isTaskOverdue } from '@/lib/api/task.api';
+
+export function financialKpiValue(text: string) {
+  const size = financialKpiFontSize(text);
+  return (
+    <span className="kpi-financial" style={size ? { fontSize: size } : undefined}>
+      {text}
+    </span>
+  );
+}
 
 function DashboardError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
@@ -72,6 +83,22 @@ function DashboardTabs({ role }: { role: string }) {
   );
 }
 
+/** Human due label derived from the real due date (single shared rule). */
+export function taskDueLabel(endDate: string | undefined, status: string): string {
+  if (!endDate) return 'No due date';
+  if (status === 'COMPLETED') return 'Completed';
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (endDate < today) {
+    const days = Math.round((Date.parse(today) - Date.parse(endDate)) / 86400000);
+    return `Overdue by ${days} day${days === 1 ? '' : 's'}`;
+  }
+  if (endDate === today) return 'Due Today';
+  const ahead = Math.round((Date.parse(endDate) - Date.parse(today)) / 86400000);
+  if (ahead === 1) return 'Due Tomorrow';
+  return `In ${ahead} Days`;
+}
+
 function criticalTasks(tasks: ApiDashboardTask[]): ApiDashboardTask[] {
   return [...tasks]
     .filter((t) => t.status !== 'COMPLETED')
@@ -81,7 +108,7 @@ function criticalTasks(tasks: ApiDashboardTask[]): ApiDashboardTask[] {
       if (ao !== bo) return ao - bo;
       return (a.endDate ?? '').localeCompare(b.endDate ?? '');
     })
-    .slice(0, 3);
+    .slice(0, 4);
 }
 
 function CriticalTasksPanel({ tasks }: { tasks: ApiDashboardTask[] }) {
@@ -100,7 +127,7 @@ function CriticalTasksPanel({ tasks }: { tasks: ApiDashboardTask[] }) {
                 {t.projectName} · {t.stageName}
               </p>
               <p>
-                Due {t.endDate ? displayDate(t.endDate) : '—'} · {t.progress}%{' '}
+                {taskDueLabel(t.endDate, t.status)} · {t.progress}%{' '}
                 <Badge value={isTaskOverdue(t.endDate, t.status) ? 'Overdue' : t.status} />
               </p>
             </div>
@@ -111,28 +138,237 @@ function CriticalTasksPanel({ tasks }: { tasks: ApiDashboardTask[] }) {
   );
 }
 
-function ProjectsOverviewPanel({ projects }: { projects: ApiDashboardProject[] }) {
-  const rows = [...projects].sort((a, b) => a.progressPercent - b.progressPercent).slice(0, 3);
+function TaskStatusBreakdownPanel({ tasks }: { tasks: ApiDashboardTask[] }) {
+  const open = tasks.filter((t) => t.status !== 'COMPLETED');
   return (
-    <Panel title="Projects Overview" subtitle="Lowest completion first.">
-      {!rows.length ? (
-        <p className="small">No projects yet.</p>
+    <Panel title="Task Status Breakdown" subtitle="Company-wide task distribution.">
+      {!tasks.length ? (
+        <p className="small">No tasks yet.</p>
       ) : (
-        rows.map((p) => (
-          <div className="attention-card" key={p.projectId}>
-            <h3>
-              <TextLink href={'/app/projects/' + p.projectId}>{p.name}</TextLink>
-            </h3>
-            <p>
-              {formatAmount(p.paid)} / {formatAmount(p.budget)}
-            </p>
-            <div className="section-space">
-              <Progress value={p.progressPercent} />
-            </div>
-          </div>
-        ))
+        <DetailList
+          items={[
+            ['Not Started', <strong key="ns">{tasks.filter((t) => t.status === 'NOT_STARTED').length}</strong>],
+            ['In Progress', <strong key="ip">{tasks.filter((t) => t.status === 'IN_PROGRESS').length}</strong>],
+            ['Completed', <strong key="c">{tasks.filter((t) => t.status === 'COMPLETED').length}</strong>],
+            ['Overdue', <strong key="o">{open.filter((t) => isTaskOverdue(t.endDate, t.status)).length}</strong>],
+          ]}
+        />
       )}
     </Panel>
+  );
+}
+
+/** Project row enriched with list fields (status/location/image). Paid stays unknown for PM. */
+export interface AttentionProject {
+  projectId: string;
+  name: string;
+  status?: FrontendProjectStatus;
+  location?: string;
+  image?: string;
+  budget: number;
+  paid?: number;
+  remaining?: number;
+  progressPercent: number;
+}
+
+export function mergeAttentionProjects(
+  summaryProjects: ApiDashboardProject[],
+  listProjects: ApiProject[],
+): AttentionProject[] {
+  const byId = new Map(listProjects.map((p) => [p.id, p]));
+  return summaryProjects.map((p) => {
+    const match = byId.get(p.projectId);
+    return {
+      projectId: p.projectId,
+      name: p.name,
+      status: match?.status,
+      location: match?.location ?? undefined,
+      image: match?.image ?? undefined,
+      budget: p.budget,
+      paid: p.paid,
+      remaining: p.remaining,
+      progressPercent: p.progressPercent,
+    };
+  });
+}
+
+function ProjectAttentionCard({
+  project,
+  overdue,
+}: {
+  project: AttentionProject;
+  overdue?: ApiDashboardTask;
+}) {
+  const utilization = project.budget > 0 && project.paid !== undefined
+    ? Math.round((project.paid / project.budget) * 100)
+    : null;
+  return (
+    <div className="attention-card">
+      <div className="attention-top">
+        {project.image ? (
+          <img src={project.image} alt="" />
+        ) : (
+          <span className="avatar-placeholder" style={{ width: 50, height: 50, fontSize: 20 }} aria-hidden="true">
+            {project.name.charAt(0)}
+          </span>
+        )}
+        <div>
+          <h3>
+            <TextLink href={'/app/projects/' + project.projectId}>{project.name}</TextLink>{' '}
+            {project.status && <Badge value={project.status} />}
+          </h3>
+          <p>{project.location ?? 'Location not supplied'}</p>
+          <p>Completion · {project.progressPercent}%</p>
+        </div>
+        <div className="attention-budget">
+          <small>Budget</small>
+          {formatAmount(project.budget)}
+          {project.paid !== undefined && (
+            <small>
+              Paid {formatAmount(project.paid)}
+              {utilization !== null ? ` · ${utilization}%` : ''}
+            </small>
+          )}
+        </div>
+      </div>
+      {overdue && (
+        <p className="warning-banner" role="alert">
+          <TriangleAlert size={13} />
+          Overdue: {overdue.title} — {taskDueLabel(overdue.endDate, overdue.status)} ·{' '}
+          <TextLink href={'/app/tasks/' + overdue.id}>View Task</TextLink>
+        </p>
+      )}
+      <Progress value={project.progressPercent} />
+    </div>
+  );
+}
+
+type StatusFilter = '' | FrontendProjectStatus;
+
+function ProjectsAttentionPanel({
+  projects,
+  tasksByProject,
+}: {
+  projects: AttentionProject[];
+  tasksByProject: Map<string, ApiDashboardTask[]>;
+}) {
+  const [filter, setFilter] = useState<StatusFilter>('');
+  const rows = projects
+    .filter((p) => (filter ? p.status === filter : p.status !== 'COMPLETED'))
+    .sort((a, b) => a.progressPercent - b.progressPercent)
+    .slice(0, 4);
+  return (
+    <Panel
+      title="Projects Requiring Attention"
+      subtitle="Active projects sorted by lowest completion."
+      action={
+        <label className="small">
+          Project status{' '}
+          <select aria-label="Project status" value={filter} onChange={(e) => setFilter(e.target.value as StatusFilter)}>
+            <option value="">Needs attention</option>
+            <option value="PLANNING">Planning</option>
+            <option value="IN_PROGRESS">In Progress</option>
+            <option value="ON_HOLD">On Hold</option>
+            <option value="COMPLETED">Completed</option>
+          </select>
+        </label>
+      }
+    >
+      {!rows.length ? (
+        <p className="small">No projects match this filter.</p>
+      ) : (
+        rows.map((p) => {
+          const overdue = (tasksByProject.get(p.projectId) ?? [])
+            .filter((t) => isTaskOverdue(t.endDate, t.status))
+            .sort((a, b) => (a.endDate ?? '').localeCompare(b.endDate ?? ''))[0];
+          return <ProjectAttentionCard key={p.projectId} project={p} overdue={overdue} />;
+        })
+      )}
+    </Panel>
+  );
+}
+
+function RecentPaymentsPanel({
+  payments,
+  projectNames,
+  canPay,
+}: {
+  payments: ApiDashboardRecentPayment[];
+  projectNames: Map<string, string>;
+  canPay: boolean;
+}) {
+  return (
+    <Panel title="Financial Overview" subtitle="Recent disbursements across projects." action={<TextLink href="/app/payments">View All Payments</TextLink>}>
+      {!payments.length ? (
+        <p className="small">No payments recorded yet.</p>
+      ) : (
+        <DataTable
+          rows={payments}
+          searchText={(p) => `${p.amount} ${projectNames.get(p.projectId) ?? ''} ${p.description ?? ''}`}
+          placeholder="Search payments…"
+          emptyTitle="No payments recorded yet"
+          columns={[
+            {
+              label: 'Amount',
+              value: (p) => <strong>{formatAmount(p.amount)}</strong>,
+              sort: (p) => p.amount,
+            },
+            { label: 'Project', value: (p) => projectNames.get(p.projectId) ?? '—' },
+            {
+              label: 'Date',
+              value: (p) => displayDate(p.paymentDate),
+              sort: (p) => p.paymentDate,
+            },
+            { label: 'Details', value: (p) => p.description ?? '—' },
+            ...(canPay
+              ? [
+                  {
+                    label: 'Actions',
+                    value: (p: ApiDashboardRecentPayment) => (
+                      <TextLink href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>
+                        View
+                      </TextLink>
+                    ),
+                  },
+                ]
+              : []),
+          ]}
+        />
+      )}
+    </Panel>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div aria-busy="true">
+      <div className="stats six" aria-hidden="true">
+        {['a', 'b', 'c', 'd', 'e', 'f'].map((k) => (
+          <StatCard key={k} label="…" value="—" />
+        ))}
+      </div>
+      <div className="two-column">
+        <div className="stack">
+          <Panel title="Projects Requiring Attention">
+            <Loading label="Loading projects…" />
+          </Panel>
+          <Panel title="Financial Overview">
+            <Loading label="Loading payments…" />
+          </Panel>
+        </div>
+        <div className="stack">
+          <Panel title="Critical Tasks">
+            <Loading label="Loading tasks…" />
+          </Panel>
+          <Panel title="Recent Leads">
+            <Loading label="Loading leads…" />
+          </Panel>
+        </div>
+      </div>
+      <p className="small" role="status" aria-live="polite">
+        Loading dashboard…
+      </p>
+    </div>
   );
 }
 
@@ -145,9 +381,10 @@ function ProjectsOverviewPanel({ projects }: { projects: ApiDashboardProject[] }
 function MainDashboard() {
   const companyId = useAuthStore((s) => s.companyId);
   const companyRole = useAuthStore((s) => s.companyRole);
+  const companyName = useAuthStore((s) => s.companyName);
   const canPay = !companyRole || canAccess(companyRole, 'payments');
   const [summary, setSummary] = useState<ApiDashboardSummary | null>(null);
-  const [fallbackProjects, setFallbackProjects] = useState<ApiProject[] | null>(null);
+  const [projectList, setProjectList] = useState<ApiProject[]>([]);
   const [tasks, setTasks] = useState<ApiDashboardTask[]>([]);
   const [leads, setLeads] = useState<ApiLead[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -162,16 +399,17 @@ function MainDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [freshTasks] = await Promise.all([getCompanyDashboardTasks(companyId)]);
+      const [freshTasks, freshProjects] = await Promise.all([
+        getCompanyDashboardTasks(companyId),
+        getProjects(companyId, { limit: 100 }),
+      ]);
       setTasks(freshTasks);
+      setProjectList(freshProjects);
       try {
-        const fresh = await getCompanyDashboardSummary(companyId);
-        setSummary(fresh);
-        setFallbackProjects(null);
+        setSummary(await getCompanyDashboardSummary(companyId));
       } catch (summaryErr) {
         if (summaryErr instanceof ApiError && summaryErr.status === 403) {
           setSummary(null);
-          setFallbackProjects(await getProjects(companyId, { limit: 100 }));
         } else {
           throw summaryErr;
         }
@@ -188,7 +426,7 @@ function MainDashboard() {
     } catch (err) {
       setError(errorFor(err, 'You do not have access to this dashboard.'));
       setSummary(null);
-      setFallbackProjects(null);
+      setProjectList([]);
       setTasks([]);
       setLeads(null);
     } finally {
@@ -202,18 +440,49 @@ function MainDashboard() {
   }, [fetchAll]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  const projectNames = useMemo(
-    () => new Map((summary?.projects ?? []).map((p) => [p.projectId, p.name])),
-    [summary],
-  );
+  const description = companyName
+    ? `Overview of ${companyName} operations, projects, and financials.`
+    : 'Overview of company operations, projects, and financials.';
+
+  const exportReport = () => {
+    if (summary) {
+      const byId = new Map(projectList.map((p) => [p.id, p]));
+      exportCsv(
+        'dashboard-projects',
+        summary.projects.map((p) => {
+          const match = byId.get(p.projectId);
+          return {
+            project: p.name,
+            status: match?.status ?? '',
+            location: match?.location ?? '',
+            budget: p.budget,
+            paid: p.paid,
+            remaining: p.remaining,
+            progress: p.progressPercent,
+          };
+        }),
+      );
+    } else {
+      exportCsv(
+        'dashboard-projects',
+        projectList.map((p) => ({
+          project: p.name,
+          status: p.status,
+          location: p.location ?? '',
+          budget: p.budget ?? 0,
+          progress: p.progressPercent ?? 0,
+        })),
+      );
+    }
+  };
 
   return (
     <>
-      <PageHeader
-        title="Dashboard"
-        eyebrow="Operations Command Center"
-        description="Overview of Buildora operations, projects, and financials."
-      >
+      <PageHeader title="Dashboard" eyebrow="Operations Command Center" description={description}>
+        <button className="button secondary" type="button" onClick={exportReport}>
+          <Download size={15} />
+          Export Report
+        </button>
         <ButtonLink href="/app/projects/new">
           <Plus size={16} />
           New Project
@@ -221,19 +490,19 @@ function MainDashboard() {
       </PageHeader>
       <DashboardTabs role="owner" />
       {loading ? (
-        <Loading label="Loading dashboard…" />
+        <DashboardSkeleton />
       ) : error ? (
         <DashboardError message={error} onRetry={fetchAll} />
       ) : summary ? (
         <OwnerDashboardBody
           summary={summary}
+          projectList={projectList}
           tasks={tasks}
           leads={leads}
-          projectNames={projectNames}
           canPay={canPay}
         />
-      ) : fallbackProjects ? (
-        <ProjectManagerDashboardBody projects={fallbackProjects} tasks={tasks} />
+      ) : projectList.length || companyRole === 'PROJECT_MANAGER' ? (
+        <ProjectManagerDashboardBody projects={projectList} tasks={tasks} />
       ) : (
         <DashboardError message="You do not have access to this dashboard." onRetry={fetchAll} />
       )}
@@ -243,79 +512,88 @@ function MainDashboard() {
 
 function OwnerDashboardBody({
   summary,
+  projectList,
   tasks,
   leads,
-  projectNames,
   canPay,
 }: {
   summary: ApiDashboardSummary;
+  projectList: ApiProject[];
   tasks: ApiDashboardTask[];
   leads: ApiLead[] | null;
-  projectNames: Map<string, string>;
   canPay: boolean;
 }) {
-  const recentLeads = (leads ?? []).slice(0, 2);
+  const attention = useMemo(
+    () => mergeAttentionProjects(summary.projects, projectList),
+    [summary, projectList],
+  );
+  const tasksByProject = useMemo(() => {
+    const groups = new Map<string, ApiDashboardTask[]>();
+    for (const t of tasks) {
+      const rows = groups.get(t.projectId) ?? [];
+      rows.push(t);
+      groups.set(t.projectId, rows);
+    }
+    return groups;
+  }, [tasks]);
+  const projectNames = useMemo(() => new Map(attention.map((p) => [p.projectId, p.name])), [attention]);
+  const leadSplit = useMemo(
+    () => ({
+      new: (leads ?? []).filter((l) => l.status === 'NEW').length,
+      contacted: (leads ?? []).filter((l) => l.status === 'CONTACTED').length,
+    }),
+    [leads],
+  );
+  const recentLeads = (leads ?? []).slice(0, 3);
   return (
     <>
       <div className="stats six">
         <StatCard
           label="Active Projects"
           value={summary.counts.inProgress}
-          detail="Across the active portfolio"
+          detail={`${summary.counts.total} projects tracked`}
           icon={<Building2 size={16} />}
         />
         <StatCard
           label="Open Leads"
           value={summary.openLeads}
-          detail="New / Contacted"
+          detail={leads ? `New ${leadSplit.new} · Contacted ${leadSplit.contacted}` : 'New / Contacted'}
           icon={<Contact size={16} />}
         />
         <StatCard
           label="Total Project Budget"
-          value={formatAmount(summary.totalBudget)}
-          detail="Across active sites"
+          value={financialKpiValue(formatAmount(summary.totalBudget))}
+          detail="All projects"
           icon={<Wallet size={16} />}
         />
-        <StatCard label="Total Paid" value={formatAmount(summary.totalPaid)} detail={`${summary.utilization}% recorded`} />
+        <StatCard
+          label="Total Payments"
+          value={financialKpiValue(formatAmount(summary.totalPaid))}
+          detail={`${summary.utilization}% utilized`}
+        />
         <StatCard
           label="Remaining Budget"
-          value={formatAmount(summary.remainingBudget)}
+          value={financialKpiValue(formatAmount(summary.remainingBudget))}
           detail="Portfolio allocation"
         />
         <StatCard
           label="Budget Utilization"
           value={`${summary.utilization}%`}
-          detail={`${summary.counts.total} projects tracked`}
+          detail="Paid versus budget"
         />
       </div>
       <div className="two-column">
         <div className="stack">
-          <ProjectsOverviewPanel projects={summary.projects} />
-          <Panel title="Recent Payments" action={<TextLink href="/app/payments">View All Payments</TextLink>}>
-            {!summary.recentPayments.length ? (
-              <p className="small">No payments recorded yet.</p>
-            ) : (
-              summary.recentPayments.map((p: ApiDashboardRecentPayment) => (
-                <div className="activity" key={p.id}>
-                  <span className="activity-dot" />
-                  <div>
-                    <strong>{formatAmount(p.amount)}</strong>
-                    <p>
-                      {projectNames.get(p.projectId) ?? 'Project'} · {displayDate(p.paymentDate)}
-                    </p>
-                    {canPay && (
-                      <TextLink href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>
-                        View Payment
-                      </TextLink>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </Panel>
+          <ProjectsAttentionPanel projects={attention} tasksByProject={tasksByProject} />
+          <RecentPaymentsPanel
+            payments={summary.recentPayments}
+            projectNames={projectNames}
+            canPay={canPay}
+          />
         </div>
         <div className="stack">
           <CriticalTasksPanel tasks={tasks} />
+          <TaskStatusBreakdownPanel tasks={tasks} />
           {leads !== null && (
             <Panel title="Recent Leads" action={<TextLink href="/app/leads">View Pipeline</TextLink>}>
               {!recentLeads.length ? (
@@ -350,31 +628,37 @@ function ProjectManagerDashboardBody({
 }) {
   const open = tasks.filter((t) => t.status !== 'COMPLETED');
   const totalBudget = projects.reduce((s, p) => s + (p.budget ?? 0), 0);
-  const asAttention: ApiDashboardProject[] = [...projects]
+  const attention: AttentionProject[] = [...projects]
     .sort((a, b) => (a.progressPercent ?? 0) - (b.progressPercent ?? 0))
-    .slice(0, 3)
     .map((p) => ({
       projectId: p.id,
       name: p.name,
+      status: p.status,
+      location: p.location ?? undefined,
+      image: p.image ?? undefined,
       budget: p.budget ?? 0,
-      paid: 0,
-      remaining: p.budget ?? 0,
       progressPercent: p.progressPercent ?? 0,
     }));
+  const tasksByProject = new Map<string, ApiDashboardTask[]>();
+  for (const t of tasks) {
+    const rows = tasksByProject.get(t.projectId) ?? [];
+    rows.push(t);
+    tasksByProject.set(t.projectId, rows);
+  }
   return (
     <>
       <div className="stats six">
         <StatCard
           label="Active Projects"
           value={projects.filter((p) => p.status === 'IN_PROGRESS').length}
-          detail="Across the active portfolio"
+          detail={`${projects.length} projects tracked`}
           icon={<Building2 size={16} />}
         />
         <StatCard label="Total Projects" value={projects.length} detail="All statuses" icon={<DoorOpen size={16} />} />
         <StatCard
           label="Total Project Budget"
-          value={formatAmount(totalBudget)}
-          detail="Across active sites"
+          value={financialKpiValue(formatAmount(totalBudget))}
+          detail="All projects"
           icon={<Wallet size={16} />}
         />
         <StatCard label="Open Tasks" value={open.length} detail="Not completed" icon={<ClipboardList size={16} />} />
@@ -391,26 +675,11 @@ function ProjectManagerDashboardBody({
       </div>
       <div className="two-column">
         <div className="stack">
-          <Panel title="Projects Overview" subtitle="Lowest completion first. Budget utilization is owner-visible only.">
-            {!asAttention.length ? (
-              <p className="small">No projects yet.</p>
-            ) : (
-              asAttention.map((p) => (
-                <div className="attention-card" key={p.projectId}>
-                  <h3>
-                    <TextLink href={'/app/projects/' + p.projectId}>{p.name}</TextLink>
-                  </h3>
-                  <p>{formatAmount(p.budget)} budget</p>
-                  <div className="section-space">
-                    <Progress value={p.progressPercent} />
-                  </div>
-                </div>
-              ))
-            )}
-          </Panel>
+          <ProjectsAttentionPanel projects={attention} tasksByProject={tasksByProject} />
         </div>
         <div className="stack">
           <CriticalTasksPanel tasks={tasks} />
+          <TaskStatusBreakdownPanel tasks={tasks} />
         </div>
       </div>
     </>
@@ -418,14 +687,29 @@ function ProjectManagerDashboardBody({
 }
 
 // ---------------------------------------------------------------------------
-// Site Engineer dashboard (real company tasks; engineer-readable only).
-// ---------------------------------------------------------------------------
+// Site Engineer dashboard: real company tasks + real project/stage reads.
+// Panels without backend support (activity feed, staffing) are omitted
+// rather than mocked.
+
+interface EngineerStageCard {
+  stageId: string;
+  stageName: string;
+  order: number;
+  status: string;
+  projectId: string;
+  projectName: string;
+  projectProgress: number;
+  taskTotal: number;
+  taskDone: number;
+}
 
 function EngineerDashboard() {
   const companyId = useAuthStore((s) => s.companyId);
   const sessionUser = useAuthStore((s) => s.user);
   const [tasks, setTasks] = useState<ApiDashboardTask[]>([]);
-  const [activeProjects, setActiveProjects] = useState(0);
+  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const [stages, setStages] = useState<EngineerStageCard[]>([]);
+  const [stagesError, setStagesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -437,17 +721,59 @@ function EngineerDashboard() {
     }
     setLoading(true);
     setError(null);
+    setStagesError(null);
     try {
       const [freshTasks, projectList] = await Promise.all([
         getCompanyDashboardTasks(companyId),
         getProjects(companyId, { limit: 100 }),
       ]);
       setTasks(freshTasks);
-      setActiveProjects(projectList.filter((p) => p.status === 'IN_PROGRESS').length);
+      setProjects(projectList);
+      // Bounded per-project stage read (any company member may read
+      // stages; one request per project, no per-task fan-out).
+      try {
+        const perProject = await Promise.all(
+          projectList.map(async (p) => {
+            const list = await getStages(companyId, p.id);
+            return list.map((s) => ({ stage: s, project: p }));
+          }),
+        );
+        const tasksByStage = new Map<string, ApiDashboardTask[]>();
+        for (const t of freshTasks) {
+          const rows = tasksByStage.get(t.stageId) ?? [];
+          rows.push(t);
+          tasksByStage.set(t.stageId, rows);
+        }
+        setStages(
+          perProject
+            .flat()
+            .filter(({ stage }) => stage.status === 'IN_PROGRESS')
+            .sort((a, b) => a.stage.order - b.stage.order)
+            .map(({ stage, project }) => {
+              const rows = tasksByStage.get(stage.id) ?? [];
+              const done = rows.filter((t) => t.status === 'COMPLETED').length;
+              return {
+                stageId: stage.id,
+                stageName: stage.name,
+                order: stage.order,
+                status: stage.status,
+                projectId: project.id,
+                projectName: project.name,
+                projectProgress: project.progressPercent ?? 0,
+                taskTotal: rows.length,
+                taskDone: done,
+              };
+            }),
+        );
+      } catch (stageErr) {
+        setStages([]);
+        setStagesError(errorFor(stageErr, 'You do not have access to stage data.'));
+      }
     } catch (err) {
       setError(errorFor(err, 'You do not have access to this dashboard.'));
       setTasks([]);
-      setActiveProjects(0);
+      setProjects([]);
+      setStages([]);
     } finally {
       setLoading(false);
     }
@@ -464,65 +790,109 @@ function EngineerDashboard() {
     [tasks, sessionUser],
   );
   const mineOpen = mine.filter((t) => t.status !== 'COMPLETED');
-  const byStage = useMemo(() => {
-    const groups = new Map<string, { stageName: string; projectId: string; projectName: string; rows: ApiDashboardTask[] }>();
-    for (const t of tasks) {
-      const key = t.stageId;
-      const group = groups.get(key) ?? {
-        stageName: t.stageName,
-        projectId: t.projectId,
-        projectName: t.projectName,
-        rows: [],
-      };
-      group.rows.push(t);
-      groups.set(key, group);
-    }
-    return [...groups.values()];
-  }, [tasks]);
+  const mineOverdue = mineOpen.filter((t) => isTaskOverdue(t.endDate, t.status));
+  const upcoming = useMemo(
+    () =>
+      [...mineOpen]
+        .filter((t) => t.endDate)
+        .sort((a, b) => (a.endDate ?? '').localeCompare(b.endDate ?? ''))
+        .slice(0, 4),
+    [mineOpen],
+  );
+  const activeProjects = projects.filter((p) => p.status === 'IN_PROGRESS');
 
   return (
     <>
       <PageHeader
         title="Site Operations Dashboard"
         eyebrow="Operations Command Center"
-        description="Your assigned site tasks and current stage workload."
+        description="Live project stages, assigned tasks, and construction progress."
       >
         <ButtonLink href="/app/tasks/new">
           <Plus size={16} />
           New Task
         </ButtonLink>
       </PageHeader>
+      {sessionUser && (
+        <p className="small" style={{ marginBottom: 16 }}>
+          {sessionUser.name} · Site Engineer
+        </p>
+      )}
       <DashboardTabs role="engineer" />
       {loading ? (
-        <Loading label="Loading site dashboard…" />
+        <div aria-busy="true">
+          <div className="stats" aria-hidden="true">
+            {['a', 'b', 'c', 'd'].map((k) => (
+              <StatCard key={k} label="…" value="—" />
+            ))}
+          </div>
+          <Panel title="Active Construction Stages Progress">
+            <Loading label="Loading stages…" />
+          </Panel>
+          <p className="small" role="status" aria-live="polite">
+            Loading site dashboard…
+          </p>
+        </div>
       ) : error ? (
         <DashboardError message={error} onRetry={fetchAll} />
       ) : (
         <>
           <div className="stats">
             <StatCard
-              label="My Open Tasks"
-              value={mineOpen.length}
-              detail="Assigned to me"
+              label="Active Projects"
+              value={activeProjects.length}
+              detail={`${projects.length} projects tracked`}
+              icon={<Building2 size={16} />}
+            />
+            <StatCard
+              label="Stages In Progress"
+              value={stagesError ? '—' : stages.length}
+              detail="Across active projects"
               icon={<ClipboardList size={16} />}
             />
             <StatCard
-              label="My Overdue Tasks"
-              value={mineOpen.filter((t) => isTaskOverdue(t.endDate, t.status)).length}
-              detail="Need attention"
+              label="Assigned Tasks"
+              value={mineOpen.length}
+              detail={`${mine.length} total assigned to me`}
             />
             <StatCard
-              label="My Completed Tasks"
-              value={mine.filter((t) => t.status === 'COMPLETED').length}
+              label="Overdue Tasks"
+              value={mineOverdue.length}
               detail="Assigned to me"
             />
-            <StatCard
-              label="Active Projects"
-              value={activeProjects}
-              detail="Across the active portfolio"
-              icon={<Building2 size={16} />}
-            />
           </div>
+          <Panel title="Active Construction Stages Progress" subtitle="Real in-progress stages with task completion.">
+            {stagesError ? (
+              <DashboardError message={stagesError} onRetry={fetchAll} />
+            ) : !stages.length ? (
+              <p className="small">No stages in progress.</p>
+            ) : (
+              <div className="stage-grid">
+                {stages.map((s) => {
+                  const pct = s.taskTotal ? Math.round((s.taskDone / s.taskTotal) * 100) : 0;
+                  return (
+                    <div className="stage-card" key={s.stageId}>
+                      <div className="eyebrow">Phase {String(s.order).padStart(2, '0')}</div>
+                      <Badge value={s.status} />
+                      <h3>{s.stageName}</h3>
+                      <small>
+                        {s.projectName} · {s.taskDone}/{s.taskTotal} tasks done
+                      </small>
+                      <p className="small">Task completion</p>
+                      <Progress value={pct} />
+                      <p className="small section-space">Project progress</p>
+                      <Progress value={s.projectProgress} />
+                      <div className="section-space">
+                        <TextLink href={'/app/construction/stages/' + s.stageId}>
+                          View Stage
+                        </TextLink>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Panel>
           <div className="two-column">
             <div className="stack">
               <Panel title="My Site Tasks & Milestones" subtitle="Only tasks assigned to you.">
@@ -535,24 +905,28 @@ function EngineerDashboard() {
                     placeholder="Search my tasks…"
                     emptyTitle="No tasks assigned to you"
                     columns={[
-                      { label: 'Task', value: (t) => <strong>{t.title}</strong>, sort: (t) => t.title },
+                      { label: 'Task Name', value: (t) => <strong>{t.title}</strong>, sort: (t) => t.title },
                       { label: 'Project', value: (t) => t.projectName },
                       { label: 'Stage', value: (t) => t.stageName },
                       {
                         label: 'Due Date',
-                        value: (t) => (t.endDate ? displayDate(t.endDate) : '—'),
+                        value: (t) => (t.endDate ? taskDueLabel(t.endDate, t.status) : 'No due date'),
                         sort: (t) => t.endDate ?? '',
                       },
                       { label: 'Status', value: (t) => <Badge value={t.status} /> },
                       {
-                        label: 'Condition',
-                        value: (t) => (
-                          <Badge value={isTaskOverdue(t.endDate, t.status) ? 'Overdue' : 'On Track'} />
-                        ),
+                        label: 'Progress',
+                        value: (t) => <Progress value={t.progress} />,
+                        sort: (t) => t.progress,
                       },
                       {
                         label: 'Actions',
-                        value: (t) => <TextLink href={'/app/tasks/' + t.id}>View Task</TextLink>,
+                        value: (t) => (
+                          <div className="row-actions">
+                            <TextLink href={'/app/tasks/' + t.id}>View</TextLink>
+                            <TextLink href={'/app/tasks/' + t.id + '/updates/new'}>Add Update</TextLink>
+                          </div>
+                        ),
                       },
                     ]}
                   />
@@ -560,28 +934,35 @@ function EngineerDashboard() {
               </Panel>
             </div>
             <div className="stack">
-              <Panel title="Site Workload by Stage" subtitle="All company tasks grouped by stage.">
-                {!byStage.length ? (
-                  <p className="small">No stages with tasks.</p>
+              <Panel title="Task Status Breakdown" subtitle="My assigned tasks by status.">
+                {!mine.length ? (
+                  <p className="small">No tasks assigned to you.</p>
                 ) : (
-                  byStage.map((g) => {
-                    const done = g.rows.filter((t) => t.status === 'COMPLETED').length;
-                    const pct = g.rows.length ? Math.round((done / g.rows.length) * 100) : 0;
-                    return (
-                      <div className="attention-card" key={g.rows[0].stageId}>
-                        <h3>{g.stageName}</h3>
+                  <DetailList
+                    items={[
+                      ['Not Started', <strong key="ns">{mine.filter((t) => t.status === 'NOT_STARTED').length}</strong>],
+                      ['In Progress', <strong key="ip">{mine.filter((t) => t.status === 'IN_PROGRESS').length}</strong>],
+                      ['Completed', <strong key="c">{mine.filter((t) => t.status === 'COMPLETED').length}</strong>],
+                      ['Overdue', <strong key="o">{mineOverdue.length}</strong>],
+                    ]}
+                  />
+                )}
+              </Panel>
+              <Panel title="Upcoming Deadlines" subtitle="My next due tasks.">
+                {!upcoming.length ? (
+                  <p className="small">No upcoming deadlines.</p>
+                ) : (
+                  upcoming.map((t) => (
+                    <div className="activity" key={t.id}>
+                      <span className="activity-dot" />
+                      <div>
+                        <TextLink href={'/app/tasks/' + t.id}>{t.title}</TextLink>
                         <p>
-                          {g.projectName} · {done}/{g.rows.length} tasks done
+                          {t.projectName} · {taskDueLabel(t.endDate, t.status)}
                         </p>
-                        <div className="section-space">
-                          <Progress value={pct} />
-                        </div>
-                        <TextLink href={'/app/construction/stages/' + g.rows[0].stageId}>
-                          View Stage
-                        </TextLink>
                       </div>
-                    );
-                  })
+                    </div>
+                  ))
                 )}
               </Panel>
             </div>
@@ -591,37 +972,45 @@ function EngineerDashboard() {
     </>
   );
 }
+// Sales dashboard (real sales summary + real Leads API; no project,
+// payment, task, or apartment-hierarchy calls).
+// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Sales dashboard (real sales summary + real leads; no project/payment calls).
-// ---------------------------------------------------------------------------
+type LeadFilter = '' | 'NEW' | 'CONTACTED' | 'CLOSED';
+
+function shortUnitId(apartmentId: string): string {
+  return apartmentId.slice(0, 8);
+}
 
 function SalesDashboard() {
   const companyId = useAuthStore((s) => s.companyId);
   const [sales, setSales] = useState<ApiSalesDashboard | null>(null);
+  const [salesError, setSalesError] = useState<string | null>(null);
   const [leads, setLeads] = useState<ApiLead[]>([]);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<LeadFilter>('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     if (!companyId) {
       setLoading(false);
-      setError('No company context. Please sign in again.');
+      setSalesError('No company context. Please sign in again.');
       return;
     }
     setLoading(true);
-    setError(null);
+    setSalesError(null);
+    setLeadsError(null);
     try {
-      const [freshSales, freshLeads] = await Promise.all([
-        getCompanySalesDashboard(companyId),
-        getCompanyLeads(companyId),
-      ]);
-      setSales(freshSales);
-      setLeads(freshLeads);
+      setSales(await getCompanySalesDashboard(companyId));
     } catch (err) {
-      setError(errorFor(err, 'You do not have access to this dashboard.'));
       setSales(null);
+      setSalesError(errorFor(err, 'You do not have access to this dashboard.'));
+    }
+    try {
+      setLeads(await getCompanyLeads(companyId));
+    } catch (err) {
       setLeads([]);
+      setLeadsError(errorFor(err, 'You do not have access to leads.'));
     } finally {
       setLoading(false);
     }
@@ -641,13 +1030,21 @@ function SalesDashboard() {
     }),
     [leads],
   );
+  const visibleLeads = leads.filter((l) => !filter || l.status === filter);
+  const topUnits = (sales?.topApartments ?? []).slice(0, 3);
+  const filterTabs: Array<{ key: LeadFilter; label: string; count: number }> = [
+    { key: '', label: 'All', count: leads.length },
+    { key: 'NEW', label: 'New', count: counts.new },
+    { key: 'CONTACTED', label: 'Contacted', count: counts.contacted },
+    { key: 'CLOSED', label: 'Closed', count: counts.closed },
+  ];
 
   return (
     <>
       <PageHeader
         title="Sales & Property Dashboard"
         eyebrow="Operations Command Center"
-        description="Unit availability, enquiries, and the lead pipeline."
+        description="Manage public apartments, client leads, and property inventory visibility."
       >
         <ButtonLink href="/apartments" secondary>
           View Public Catalog
@@ -655,82 +1052,174 @@ function SalesDashboard() {
       </PageHeader>
       <DashboardTabs role="sales" />
       {loading ? (
-        <Loading label="Loading sales dashboard…" />
-      ) : error ? (
-        <DashboardError message={error} onRetry={fetchAll} />
+        <div aria-busy="true">
+          <div className="stats" aria-hidden="true">
+            {['a', 'b', 'c', 'd'].map((k) => (
+              <StatCard key={k} label="…" value="—" />
+            ))}
+          </div>
+          <Panel title="Apartments Receiving Most Leads">
+            <Loading label="Loading top apartments…" />
+          </Panel>
+          <Panel title="Recent Leads & Pipeline">
+            <Loading label="Loading leads…" />
+          </Panel>
+          <p className="small" role="status" aria-live="polite">
+            Loading sales dashboard…
+          </p>
+        </div>
+      ) : salesError && !sales ? (
+        <DashboardError message={salesError} onRetry={fetchAll} />
       ) : (
         <>
           <div className="stats">
             <StatCard
-              label="Total Units"
-              value={sales?.apartments.total ?? 0}
-              detail="Tracked inventory"
-              icon={<DoorOpen size={16} />}
-            />
-            <StatCard label="Available" value={sales?.apartments.available ?? 0} detail="Ready for sale" />
-            <StatCard label="Reserved" value={sales?.apartments.reserved ?? 0} detail="Held units" />
-            <StatCard label="Sold" value={sales?.apartments.sold ?? 0} detail="Closed units" />
-            <StatCard
               label="Public Apartments"
               value={sales?.apartments.public ?? 0}
-              detail="On the showcase"
+              detail={`of ${sales?.apartments.total ?? 0} total units`}
               icon={<Building2 size={16} />}
             />
+            <StatCard
+              label="Total Leads"
+              value={leads.length}
+              detail={`New ${counts.new} · Contacted ${counts.contacted}`}
+              icon={<Contact size={16} />}
+            />
+            <StatCard label="New Leads" value={counts.new} detail="Awaiting first contact" />
+            <StatCard label="Closed Leads" value={counts.closed} detail="Concluded" />
           </div>
-          <div className="two-column">
-            <div className="stack">
-              <Panel
-                title="Most Enquired Units"
-                subtitle="Units with the most leads."
-                action={<TextLink href="/app/leads">View Pipeline</TextLink>}
-              >
-                {!sales?.topUnits.length ? (
-                  <p className="small">No enquiries yet.</p>
-                ) : (
-                  <DataTable
-                    rows={sales.topUnits}
-                    searchText={(u) => `${u.unitNumber} ${u.projectName}`}
-                    placeholder="Search units…"
-                    emptyTitle="No enquiries yet"
-                    columns={[
-                      { label: 'Unit', value: (u) => <strong>{u.unitNumber}</strong>, sort: (u) => u.unitNumber },
-                      { label: 'Project', value: (u) => u.projectName },
-                      { label: 'Enquiries', value: (u) => u.leadCount, sort: (u) => u.leadCount },
-                    ]}
-                  />
-                )}
-              </Panel>
-            </div>
-            <div className="stack">
-              <Panel
-                title="Lead Pipeline"
-                subtitle={`New ${counts.new} · Contacted ${counts.contacted} · Closed ${counts.closed}`}
-              >
-                {!leads.length ? (
-                  <p className="small">No leads yet.</p>
-                ) : (
-                  <DataTable
-                    rows={leads}
-                    searchText={(l) => `${l.name} ${l.phone ?? ''} ${l.email ?? ''}`}
-                    placeholder="Search leads…"
-                    emptyTitle="No leads yet"
-                    columns={[
-                      { label: 'Lead', value: (l) => <strong>{l.name}</strong>, sort: (l) => l.name },
-                      { label: 'Status', value: (l) => <Badge value={l.status} /> },
-                      {
-                        label: 'Enquired',
-                        value: (l) => displayDate(l.createdAt),
-                        sort: (l) => l.createdAt,
-                      },
-                      {
-                        label: 'Actions',
-                        value: (l) => <TextLink href={'/app/leads/' + l.id}>View</TextLink>,
-                      },
-                    ]}
-                  />
-                )}
-              </Panel>
-            </div>
+          <Panel
+            title="Apartments Receiving Most Leads"
+            subtitle="Properties generating the most lead interest."
+            action={<TextLink href="/app/leads">View Pipeline</TextLink>}
+          >
+            {!topUnits.length ? (
+              <p className="small">No lead interest yet.</p>
+            ) : (
+              <div className="three-grid">
+                {topUnits.map((u) => {
+                  const specs = [
+                    u.bedrooms !== undefined ? `${u.bedrooms} Beds` : null,
+                    u.bathrooms !== undefined ? `${u.bathrooms} Baths` : null,
+                    u.areaSqm !== undefined ? `${u.areaSqm} m²` : null,
+                    u.floorNumber !== undefined ? `Floor ${u.floorNumber}` : null,
+                  ].filter((s): s is string => s !== null);
+                  return (
+                    <article className="project-card" key={u.apartmentId}>
+                      <div className="project-image">
+                        {u.primaryImage ? (
+                          <img src={u.primaryImage} alt={'Apartment ' + u.unitNumber} />
+                        ) : (
+                          <span
+                            className="avatar-placeholder"
+                            style={{ width: 64, height: 64, fontSize: 24 }}
+                            aria-hidden="true"
+                          >
+                            {u.unitNumber.charAt(0)}
+                          </span>
+                        )}
+                        <Badge value={`${u.leadCount} Leads`} />
+                      </div>
+                      <div className="project-card-body">
+                        <div className="budget" style={{ marginTop: 0 }}>
+                          <span>{u.projectName}</span>
+                          {u.isPublic && <Badge value="Public" />}
+                        </div>
+                        <h3>Apartment {u.unitNumber}</h3>
+                        <p className="small">
+                          {u.leadCount} lead{u.leadCount === 1 ? '' : 's'} received
+                          {u.price !== undefined ? ` · ${money(u.price)}` : ''}
+                        </p>
+                        {specs.length > 0 && <p className="small">{specs.join(' · ')}</p>}
+                      </div>
+                      <div className="project-card-footer">
+                        <span>Unit {shortUnitId(u.apartmentId)}</span>
+                        <TextLink href="/app/leads">View Leads</TextLink>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </Panel>
+          <div className="section-space">
+            <Panel
+              title="Recent Leads & Pipeline"
+              subtitle="Recent client interest across public property inventory."
+            >
+              {leadsError ? (
+                <DashboardError message={leadsError} onRetry={fetchAll} />
+              ) : (
+                <>
+                  <div className="row-actions" role="group" aria-label="Filter leads by status">
+                    {filterTabs.map((t) => (
+                      <button
+                        key={t.label}
+                        type="button"
+                        className={'button' + (filter === t.key ? '' : ' secondary')}
+                        aria-pressed={filter === t.key}
+                        onClick={() => setFilter(t.key)}
+                      >
+                        {t.label} ({t.count})
+                      </button>
+                    ))}
+                  </div>
+                  {!visibleLeads.length ? (
+                    <p className="small section-space">
+                      {filter ? `No ${filter.toLowerCase()} leads.` : 'No leads yet.'}
+                    </p>
+                  ) : (
+                    <div className="section-space">
+                      <DataTable
+                        rows={visibleLeads}
+                        searchText={(l) =>
+                          `${l.name} ${l.phone ?? ''} ${l.email ?? ''} ${l.message ?? ''}`
+                        }
+                        placeholder="Search leads…"
+                        emptyTitle={filter ? `No ${filter.toLowerCase()} leads` : 'No leads yet'}
+                        columns={[
+                          {
+                            label: 'Lead',
+                            value: (l) => (
+                              <div>
+                                <strong>{l.name}</strong>
+                                {l.message && <small>Message: {l.message}</small>}
+                              </div>
+                            ),
+                            sort: (l) => l.name,
+                          },
+                          { label: 'Unit', value: (l) => shortUnitId(l.apartmentId) },
+                          {
+                            label: 'Contact',
+                            value: (l) => (
+                              <div>
+                                {l.phone ?? '—'}
+                                {l.email && <small>{l.email}</small>}
+                              </div>
+                            ),
+                          },
+                          { label: 'Status', value: (l) => <Badge value={l.status} /> },
+                          {
+                            label: 'Received',
+                            value: (l) => displayDate(l.createdAt),
+                            sort: (l) => l.createdAt,
+                          },
+                          {
+                            label: 'Actions',
+                            value: (l) => (
+                              <div className="row-actions">
+                                <TextLink href={'/app/leads/' + l.id}>View</TextLink>
+                                <TextLink href={'/app/leads/' + l.id + '/status'}>Update</TextLink>
+                              </div>
+                            ),
+                          },
+                        ]}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+            </Panel>
           </div>
         </>
       )}

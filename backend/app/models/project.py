@@ -19,9 +19,9 @@ class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
     CheckConstraint(
-        "progress >= 0 AND progress <= 100",
-        name="check_project_progress"
-    ),
+    "progress_percent >= 0 AND progress_percent <= 100",
+    name="check_project_progress",
+),
 )
     id: Mapped[UUID] = mapped_column(
         primary_key=True,

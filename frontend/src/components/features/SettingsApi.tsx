@@ -49,6 +49,13 @@ import {
 import { DataTable } from '../ui/DataTable';
 import { ConfirmDialog, Dialog } from '../ui/Dialog';
 import { Field, FormActions, NumberedSection } from '../forms/FormPrimitives';
+import { WizardNav, WizardStepPanel, WizardFooter } from '../forms/FormWizard';
+import {
+  findFirstInvalidStep,
+  focusFirstField,
+  handleWizardEnterKey,
+  type WizardStepDef,
+} from '@/lib/wizard';
 
 function ListError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
@@ -831,10 +838,18 @@ export function TeamSettingsSection() {
   );
 }
 
+const ADD_MEMBER_WIZARD_STEPS: WizardStepDef[] = [
+  { id: 'member', title: 'Member Information', micro: 'GENERAL', description: 'Name and contact details for the new member', fields: ['name', 'email', 'phone'] },
+  { id: 'security', title: 'Account Security', micro: 'SECURITY', description: 'Login password for the new account', fields: ['password', 'confirmPassword'] },
+  { id: 'role', title: 'Company Role', micro: 'ROLE', description: 'Access level within the company', fields: ['role'] },
+];
+
 function AddMemberForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const companyId = useCompanyId();
   const { notify } = useWorkspace();
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [step, setStep] = useState(0);
+  const isLast = step === ADD_MEMBER_WIZARD_STEPS.length - 1;
   const form = useForm<z.input<typeof memberAddSchema>, unknown, z.output<typeof memberAddSchema>>({
     resolver: zodResolver(memberAddSchema),
     defaultValues: {
@@ -845,45 +860,78 @@ function AddMemberForm({ onClose, onSaved }: { onClose: () => void; onSaved: () 
       confirmPassword: '',
       role: 'SITE_ENGINEER',
     },
+    shouldUnregister: false,
   });
 
-  return (
-    <FormProvider {...form}>
-      <form
-        noValidate
-        onSubmit={form.handleSubmit(async (v) => {
-          if (!companyId) {
-            setBackendError('No company context. Please sign in again.');
-            return;
-          }
-          setBackendError(null);
-          try {
-            await addCompanyMember(companyId, {
-              name: v.name,
-              email: v.email,
-              phone: v.phone,
-              password: v.password,
-              role: v.role,
-            });
-            notify('Member added successfully.');
-            onSaved();
-          } catch (error) {
-            if (error instanceof ApiError && error.status === 409) {
-              setBackendError(error.detail || 'This email or phone is already registered.');
-            } else {
-              setBackendError(friendlyMessage(error));
-            }
-          }
-        })}
-      >
-        <NumberedSection number={1} title="Member Information" micro="GENERAL">
-          <Field name="name" label="Full Name *" placeholder="e.g. Maya Haddad" />
-          <div className="form-grid">
-            <Field name="email" label="Email *" type="email" placeholder="maya@example.com" />
-            <Field name="phone" label="Phone *" type="tel" placeholder="+961 70 123 456" />
-          </div>
-        </NumberedSection>
-        <NumberedSection number={2} title="Account Security" micro="SECURITY">
+  /** Validate only the current step's fields; advance exactly one step. */
+  const handleNext = async () => {
+    const triggerStep = form.trigger as (names: string[]) => Promise<boolean>;
+    const valid = await triggerStep(ADD_MEMBER_WIZARD_STEPS[step].fields);
+    if (!valid) {
+      const invalid = ADD_MEMBER_WIZARD_STEPS[step].fields.filter(
+        (name) => form.getFieldState(name as never).invalid,
+      );
+      focusFirstField(invalid.length ? invalid : ADD_MEMBER_WIZARD_STEPS[step].fields);
+      return;
+    }
+    setStep((s) => Math.min(s + 1, ADD_MEMBER_WIZARD_STEPS.length - 1));
+  };
+
+  const handleBack = () => {
+    setStep((s) => Math.max(s - 1, 0));
+  };
+
+  const submitValid = async (v: z.output<typeof memberAddSchema>) => {
+    if (!companyId) {
+      setBackendError('No company context. Please sign in again.');
+      return;
+    }
+    setBackendError(null);
+    try {
+      await addCompanyMember(companyId, {
+        name: v.name,
+        email: v.email,
+        phone: v.phone,
+        password: v.password,
+        role: v.role,
+      });
+      notify('Member added successfully.');
+      onSaved();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setBackendError(error.detail || 'This email or phone is already registered.');
+      } else {
+        setBackendError(friendlyMessage(error));
+      }
+    }
+  };
+
+  const submitInvalid = (errors: Record<string, unknown>) => {
+    const idx = findFirstInvalidStep(ADD_MEMBER_WIZARD_STEPS, errors);
+    if (idx >= 0) {
+      setStep(idx);
+      window.setTimeout(() => {
+        focusFirstField(
+          ADD_MEMBER_WIZARD_STEPS[idx].fields.filter((name) => errors[name] !== undefined),
+        );
+      }, 60);
+    }
+  };
+
+  const renderStepFields = () => {
+    switch (ADD_MEMBER_WIZARD_STEPS[step].id) {
+      case 'member':
+        return (
+          <>
+            <Field name="name" label="Full Name *" placeholder="e.g. Maya Haddad" />
+            <div className="form-grid">
+              <Field name="email" label="Email *" type="email" placeholder="maya@example.com" />
+              <Field name="phone" label="Phone *" type="tel" placeholder="+961 70 123 456" />
+            </div>
+          </>
+        );
+      case 'security':
+        return (
           <div className="form-grid">
             <Field name="password" label="Password *" type="password" autoComplete="new-password" />
             <Field
@@ -893,8 +941,9 @@ function AddMemberForm({ onClose, onSaved }: { onClose: () => void; onSaved: () 
               autoComplete="new-password"
             />
           </div>
-        </NumberedSection>
-        <NumberedSection number={3} title="Company Role" micro="ROLE">
+        );
+      case 'role':
+        return (
           <Field name="role" label="Company Role *">
             {MEMBER_CREATE_ROLES.map((r) => (
               <option key={r} value={r}>
@@ -902,17 +951,44 @@ function AddMemberForm({ onClose, onSaved }: { onClose: () => void; onSaved: () 
               </option>
             ))}
           </Field>
-        </NumberedSection>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const current = ADD_MEMBER_WIZARD_STEPS[step];
+
+  return (
+    <FormProvider {...form}>
+      <form
+        noValidate
+        onSubmit={form.handleSubmit(submitValid, submitInvalid)}
+        onKeyDown={(e) => handleWizardEnterKey(e, isLast, () => void handleNext())}
+      >
+        <WizardNav steps={ADD_MEMBER_WIZARD_STEPS} step={step} onGoBack={(i) => setStep(i)} />
+        <WizardStepPanel key={step} step={current}>
+          {renderStepFields()}
+        </WizardStepPanel>
         {backendError && (
           <p className="field-error" role="alert">
             {backendError}
           </p>
         )}
-        <FormActions onCancel={onClose} label="Add Member" pending={form.formState.isSubmitting} />
+        <WizardFooter
+          step={step}
+          totalSteps={ADD_MEMBER_WIZARD_STEPS.length}
+          submitLabel="Add Member"
+          submitPending={form.formState.isSubmitting}
+          onBack={handleBack}
+          onCancel={onClose}
+          onNext={() => void handleNext()}
+        />
       </form>
     </FormProvider>
   );
 }
+
 
 function EditMemberForm({
   member,

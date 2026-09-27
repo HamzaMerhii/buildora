@@ -148,7 +148,7 @@ function DocumentPreviewBody({ doc }: { doc: ApiDocumentWithProject }) {
   }
   if (isPreviewablePdf(doc)) {
     return (
-      <iframe title={doc.name} src={doc.fileUrl} style={{ width: '100%', height: 480, border: 0, borderRadius: 8 }} />
+      <iframe title={doc.name} src={doc.fileUrl} style={{ width: '100%', height: 'min(60vh, 620px)', minHeight: 420, border: 0, borderRadius: 8 }} />
     );
   }
   return (
@@ -311,7 +311,7 @@ function DocumentDialogs({
 }) {
   return (
     <>
-      <Dialog open={!!preview} onClose={onClosePreview} title={preview?.name ?? 'Document preview'}>
+      <Dialog open={!!preview} onClose={onClosePreview} title={preview?.name ?? 'Document preview'} wide>
         {preview && (
           <>
             <DetailList

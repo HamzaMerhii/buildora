@@ -28,6 +28,16 @@ export function toDashboardNumber(value: string | number | null | undefined): nu
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** Responsive tier for financial KPI values: short totals keep the
+ * prominent card size, longer totals step down so they stay on one
+ * line inside the card. Returns undefined for the default size. */
+export function financialKpiFontSize(text: string): number | undefined {
+  const len = text.length;
+  if (len <= 10) return undefined;
+  if (len <= 14) return 20;
+  return 16;
+}
+
 /** Raw wire shapes (snake_case). */
 export interface BackendDashboardProject {
   project_id: string;
@@ -78,6 +88,21 @@ export interface BackendDashboardTask {
   project_name: string;
 }
 
+export interface BackendTopApartment {
+  apartment_id: string;
+  unit_number: string;
+  project_id: string;
+  project_name: string;
+  lead_count: number;
+  is_public: boolean;
+  price: string | number | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  area_sqm: string | number | null;
+  floor_number: number | null;
+  primary_image: string | null;
+}
+
 export interface BackendSalesDashboard {
   apartments: {
     total: number;
@@ -86,13 +111,7 @@ export interface BackendSalesDashboard {
     sold: number;
     public: number;
   };
-  top_enquired_units: Array<{
-    apartment_id: string;
-    unit_number: string;
-    project_id: string;
-    project_name: string;
-    lead_count: number;
-  }>;
+  top_enquired_apartments: BackendTopApartment[];
 }
 
 export interface BackendFinanceRecentPayment {
@@ -109,13 +128,32 @@ export interface BackendFinanceRecentPayment {
   description: string | null;
 }
 
+export interface BackendFinanceByProject {
+  project_id: string;
+  project_name: string;
+  budget: string | number;
+  total_paid: string | number;
+  remaining: string | number;
+  current_stage_name: string | null;
+}
+
+export interface BackendFinanceTopParty {
+  party_id: string;
+  party_name: string;
+  total_paid: string | number;
+}
+
 export interface BackendFinanceDashboard {
   total_paid: string | number;
+  total_project_budget: string | number;
+  remaining_balance: string | number;
   payment_count: number;
   payments_this_month: string | number;
+  payments_this_month_count: number;
   projects_covered: number;
-  by_project: Array<{ project_id: string; project_name: string; total_paid: string | number }>;
+  by_project: BackendFinanceByProject[];
   by_category: Array<{ category_id: string; category_name: string; total_paid: string | number }>;
+  top_paid_parties: BackendFinanceTopParty[];
   recent_payments: BackendFinanceRecentPayment[];
 }
 
@@ -169,6 +207,22 @@ export interface ApiDashboardTask {
   projectName: string;
 }
 
+export interface ApiTopApartment {
+  id: string;
+  apartmentId: string;
+  unitNumber: string;
+  projectId: string;
+  projectName: string;
+  leadCount: number;
+  isPublic: boolean;
+  price?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  areaSqm?: number;
+  floorNumber?: number;
+  primaryImage?: string;
+}
+
 export interface ApiSalesDashboard {
   apartments: {
     total: number;
@@ -177,19 +231,21 @@ export interface ApiSalesDashboard {
     sold: number;
     public: number;
   };
-  topUnits: Array<{
-    id: string;
-    apartmentId: string;
-    unitNumber: string;
-    projectId: string;
-    projectName: string;
-    leadCount: number;
-  }>;
+  topApartments: ApiTopApartment[];
 }
 
 export interface ApiFinanceByProject {
   projectId: string;
   projectName: string;
+  budget: number;
+  totalPaid: number;
+  remaining: number;
+  currentStageName?: string;
+}
+
+export interface ApiFinanceTopParty {
+  partyId: string;
+  partyName: string;
   totalPaid: number;
 }
 
@@ -215,11 +271,15 @@ export interface ApiFinanceRecentPayment {
 
 export interface ApiFinanceDashboard {
   totalPaid: number;
+  totalProjectBudget: number;
+  remainingBalance: number;
   paymentCount: number;
   paymentsThisMonth: number;
+  paymentsThisMonthCount: number;
   projectsCovered: number;
   byProject: ApiFinanceByProject[];
   byCategory: ApiFinanceByCategory[];
+  topPaidParties: ApiFinanceTopParty[];
   recentPayments: ApiFinanceRecentPayment[];
 }
 
@@ -275,13 +335,20 @@ export function mapDashboardTaskToFrontend(t: BackendDashboardTask): ApiDashboar
 export function mapSalesDashboardToFrontend(s: BackendSalesDashboard): ApiSalesDashboard {
   return {
     apartments: { ...s.apartments },
-    topUnits: s.top_enquired_units.map((u) => ({
+    topApartments: (s.top_enquired_apartments ?? []).map((u) => ({
       id: u.apartment_id,
       apartmentId: u.apartment_id,
       unitNumber: u.unit_number,
       projectId: u.project_id,
       projectName: u.project_name,
       leadCount: u.lead_count,
+      isPublic: u.is_public,
+      price: u.price == null ? undefined : toDashboardNumber(u.price),
+      bedrooms: u.bedrooms ?? undefined,
+      bathrooms: u.bathrooms ?? undefined,
+      areaSqm: u.area_sqm == null ? undefined : toDashboardNumber(u.area_sqm),
+      floorNumber: u.floor_number ?? undefined,
+      primaryImage: u.primary_image ?? undefined,
     })),
   };
 }
@@ -289,20 +356,31 @@ export function mapSalesDashboardToFrontend(s: BackendSalesDashboard): ApiSalesD
 export function mapFinanceDashboardToFrontend(f: BackendFinanceDashboard): ApiFinanceDashboard {
   return {
     totalPaid: toDashboardNumber(f.total_paid),
+    totalProjectBudget: toDashboardNumber(f.total_project_budget),
+    remainingBalance: toDashboardNumber(f.remaining_balance),
     paymentCount: f.payment_count,
     paymentsThisMonth: toDashboardNumber(f.payments_this_month),
+    paymentsThisMonthCount: f.payments_this_month_count,
     projectsCovered: f.projects_covered,
-    byProject: f.by_project.map((p) => ({
+    byProject: (f.by_project ?? []).map((p) => ({
       projectId: p.project_id,
       projectName: p.project_name,
+      budget: toDashboardNumber(p.budget),
       totalPaid: toDashboardNumber(p.total_paid),
+      remaining: toDashboardNumber(p.remaining),
+      currentStageName: p.current_stage_name ?? undefined,
     })),
-    byCategory: f.by_category.map((c) => ({
+    byCategory: (f.by_category ?? []).map((c) => ({
       categoryId: c.category_id,
       categoryName: c.category_name,
       totalPaid: toDashboardNumber(c.total_paid),
     })),
-    recentPayments: f.recent_payments.map((p) => ({
+    topPaidParties: (f.top_paid_parties ?? []).map((p) => ({
+      partyId: p.party_id,
+      partyName: p.party_name,
+      totalPaid: toDashboardNumber(p.total_paid),
+    })),
+    recentPayments: (f.recent_payments ?? []).map((p) => ({
       id: p.id,
       projectId: p.project_id,
       projectName: p.project_name,

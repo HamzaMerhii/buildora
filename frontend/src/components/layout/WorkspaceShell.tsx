@@ -15,15 +15,13 @@ import {
   Settings,
   Menu,
   X,
-  Search,
-  Bell,
-  ChevronsUpDown,
   ShieldCheck,
   LogOut,
   ChevronRight,
 } from "lucide-react";
-import { useWorkspace } from "../features/WorkspaceProvider";
 import { useAuthStore } from "@/stores/auth.store";
+import { companyRoleLabel } from "@/lib/api/company-member.api";
+import { PLATFORM_ROLE_LABEL } from "@/lib/api/platform.api";
 import { canAccess, NAV_MODULES } from "@/lib/auth/permissions";
 import { getPostLoginRoute } from "@/lib/auth/redirect";
 import { label } from "@/lib/utils/format";
@@ -67,10 +65,18 @@ export function WorkspaceShell({
 }) {
   const path = usePathname();
   const router = useRouter();
-  const { data } = useWorkspace();
   const logout = useAuthStore((s) => s.logout);
   const platformRole = useAuthStore((s) => s.platformRole);
   const companyRole = useAuthStore((s) => s.companyRole);
+  const sessionUser = useAuthStore((s) => s.user);
+  const sessionStatus = useAuthStore((s) => s.sessionStatus);
+  const displayName = sessionUser?.name ?? null;
+  const roleLabel = platform
+    ? (platformRole ? PLATFORM_ROLE_LABEL[platformRole] : null)
+    : (companyRole ? companyRoleLabel[companyRole] : null);
+  const initials = displayName
+    ? displayName.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+    : '?';
   // Dashboard entry points at the role's canonical landing page, which is
   // always allowed for that role. Other entries are filtered by permission;
   // while the session is unresolved (role null) everything stays visible and
@@ -82,9 +88,6 @@ export function WorkspaceShell({
     router.push('/sign-in');
   };
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState(false);
-  const [query, setQuery] = useState("");
-  const [workspace, setWorkspace] = useState(false);
   const activePath = path.startsWith('/app/tasks') ? '/app/construction' : path.startsWith('/app/buildings') ? '/app/projects' : path;
   const isActive = (href:string) => href === '/platform' ? path === href : activePath === href || activePath.startsWith(href + '/');
   const links = platform
@@ -139,25 +142,6 @@ export function WorkspaceShell({
             </small>
           </span>
         </Link>
-        <button
-          className="workspace-switch"
-          onClick={() => setWorkspace(!workspace)}
-          aria-expanded={workspace}
-        >
-          <Building2 size={18} />
-          <span>
-            <small>{platform ? "ADMIN CONSOLE" : "WORKSPACE"}</small>
-            {platform ? "Platform Governance" : "Beirut Operations"}
-          </span>
-          <ChevronsUpDown size={16} />
-        </button>
-        {workspace && (
-          <div className="workspace-menu">
-            <Link href="/app/dashboard">Company workspace</Link>
-            <Link href="/platform">Platform administration</Link>
-            <Link href="/">Public website</Link>
-          </div>
-        )}
         <nav aria-label="Main navigation">
           {links.map(({ name, href, icon: Icon, group }) => (
             <div key={href}>
@@ -205,67 +189,6 @@ export function WorkspaceShell({
             <ChevronRight size={14} />
             <strong>{label(path.split("/")[2] || "Dashboard")}</strong>
           </div>
-          <div className="global-search">
-            <Search size={15} />
-            <input
-              aria-label="Search workspace"
-              placeholder="Search projects, apartments, tasks…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <kbd>⌘ K</kbd>
-            {query && (
-              <div className="search-results">
-                {data.projects
-                  .filter((p) =>
-                    p.name.toLowerCase().includes(query.toLowerCase()),
-                  )
-                  .map((p) => (
-                    <Link
-                      key={p.id}
-                      href={"/app/projects/" + p.id}
-                      onClick={() => setQuery("")}
-                    >
-                      {p.name}
-                      <small>Project</small>
-                    </Link>
-                  ))}
-                {data.apartments
-                  .filter((p) =>
-                    ("Apartment " + p.number)
-                      .toLowerCase()
-                      .includes(query.toLowerCase()),
-                  )
-                  .map((p) => (
-                    <Link
-                      key={p.id}
-                      href={"/app/apartments/" + p.id}
-                      onClick={() => setQuery("")}
-                    >
-                      Apartment {p.number}
-                      <small>Apartment</small>
-                    </Link>
-                  ))}
-                {data.tasks
-                  .filter((p) =>
-                    p.title.toLowerCase().includes(query.toLowerCase()),
-                  )
-                  .map((p) => (
-                    <Link
-                      key={p.id}
-                      href={"/app/tasks/" + p.id}
-                      onClick={() => setQuery("")}
-                    >
-                      {p.title}
-                      <small>Task</small>
-                    </Link>
-                  ))}
-                <Link href="/app/projects" onClick={() => setQuery("")}>
-                  Browse all projects
-                </Link>
-              </div>
-            )}
-          </div>
           <div className="header-actions">
             <Link
               className="icon-button"
@@ -274,41 +197,14 @@ export function WorkspaceShell({
             >
               <Sparkles size={18} />
             </Link>
-            <div className="notification-wrap">
-              <button
-                className="icon-button"
-                aria-label="Notifications"
-                onClick={() => setNotifications(!notifications)}
-                aria-expanded={notifications}
-              >
-                <Bell size={18} />
-                <i />
-              </button>
-              {notifications && (
-                <div className="notification-menu">
-                  <h3>Notifications</h3>
-                  <Link
-                    href="/app/tasks/task-1"
-                    onClick={() => setNotifications(false)}
-                  >
-                    Reinforcement task is overdue
-                    <small>Cedar Residence · Structure</small>
-                  </Link>
-                  <Link
-                    href="/app/leads/lead-1"
-                    onClick={() => setNotifications(false)}
-                  >
-                    New enquiry from Ahmad Khalil<small>Apartment 201</small>
-                  </Link>
-                </div>
-              )}
-            </div>
             <Link className="profile-link" href="/app/settings/profile">
-              <span>
-                {data.profile.name}
-                <small>{platform ? "Super Admin" : "Project Manager"}</small>
+              <span className="profile-text" title={displayName ?? 'User'}>
+                {displayName ?? (sessionStatus === 'loading' ? '…' : 'User')}
+                {roleLabel && <small>{roleLabel}</small>}
               </span>
-              <img src="/images/3bcc2308016c.webp" alt="Profile" />
+              <span className="profile-avatar" aria-hidden="true">
+                {initials}
+              </span>
             </Link>
           </div>
         </header>

@@ -25,6 +25,7 @@ import { getParties, type ApiParty } from '@/lib/api/party.api';
 import { getProjects } from '@/lib/api/project.api';
 import {
   getCompanyFinanceDashboard,
+  financialKpiFontSize,
   type ApiFinanceDashboard,
 } from '@/lib/api/dashboard.api';
 import {
@@ -43,6 +44,7 @@ import {
   StatCard,
   Badge,
   Panel,
+  Progress,
   TextLink,
   DetailList,
   EmptyState,
@@ -329,7 +331,7 @@ export function PaymentTableReal({
 // out across the company's projects in parallel (projects loaded once).
 // ---------------------------------------------------------------------------
 
-const CATEGORY_COLORS = ['#22c55e', '#f59e0b', '#64748b', '#3b82f6', '#a855f7', '#0ea5e9'];
+const CATEGORY_COLORS = ['#19335A', '#4675C0', '#8FC8EB', '#697A98', '#B8BFD6', '#7fa3d6'];
 
 function monthKey(value: string): string {
   return value.slice(0, 7);
@@ -1076,12 +1078,25 @@ export function PaymentCategoriesWorkspaceList() {
 // ---------------------------------------------------------------------------
 // Finance overview for OWNER/FINANCE roles, served by the dedicated
 // finance dashboard endpoint (single request, no project-list directory,
-// no per-project payment fan-out).
+// no per-project payment fan-out, no party/category directories).
 // ---------------------------------------------------------------------------
+
+function financeKpiValue(text: string) {
+  const size = financialKpiFontSize(text);
+  return (
+    <span className="kpi-financial" style={size ? { fontSize: size } : undefined}>
+      {text}
+    </span>
+  );
+}
 
 export function FinanceWorkspaceOverview() {
   const companyId = useCompanyId();
+  const companyRole = useAuthStore((s) => s.companyRole);
   const canMutate = useCanMutatePayments();
+  // The Record Payment form still needs project + party reads, which
+  // FINANCE lacks (403). Only link it where the flow actually works.
+  const recordPaymentWorks = !companyRole || companyRole === 'OWNER';
   const [data, setData] = useState<ApiFinanceDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1116,6 +1131,22 @@ export function FinanceWorkspaceOverview() {
   }, [fetchAll]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const exportLedger = () => {
+    if (!data) return;
+    exportCsv(
+      'fiscal-ledger',
+      data.recentPayments.map((p) => ({
+        date: p.paymentDate,
+        project: p.projectName,
+        party: p.partyName ?? '',
+        category: p.categoryName ?? '',
+        amount: p.amount,
+        reference: p.reference ?? '',
+        description: p.description ?? '',
+      })),
+    );
+  };
+
   const maxCategory = data?.byCategory[0]?.totalPaid ?? 0;
 
   return (
@@ -1123,82 +1154,159 @@ export function FinanceWorkspaceOverview() {
       <PageHeader
         title="Financial Overview & Payments"
         eyebrow="Operations Command Center"
-        description="Company-wide outgoing payments across all projects."
+        description="Track project disbursements, payments, budgets, and cost categories."
       >
-        {canMutate && (
+        <button className="button secondary" type="button" onClick={exportLedger} disabled={!data}>
+          <Download size={15} />
+          Export Fiscal Ledger
+        </button>
+        {canMutate && recordPaymentWorks && (
           <ButtonLink href="/app/payments/new">
             <Plus size={16} />
             Record Payment
           </ButtonLink>
         )}
-        <ButtonLink href="/app/payments" secondary>
-          View Payments
-        </ButtonLink>
       </PageHeader>
       {loading ? (
-        <p className="small" role="status" aria-live="polite">
-          Loading financials…
-        </p>
+        <div aria-busy="true">
+          <div className="stats" aria-hidden="true">
+            {['a', 'b', 'c', 'd'].map((k) => (
+              <StatCard key={k} label="…" value="—" />
+            ))}
+          </div>
+          <div className="two-column">
+            <div className="stack">
+              <Panel title="Project Budget vs Actual Payments">
+                <p className="small" role="status" aria-live="polite">Loading projects…</p>
+              </Panel>
+              <Panel title="Recent Payment Disbursements">
+                <p className="small" role="status" aria-live="polite">Loading payments…</p>
+              </Panel>
+            </div>
+            <div className="stack">
+              <Panel title="Payments by Category">
+                <p className="small" role="status" aria-live="polite">Loading categories…</p>
+              </Panel>
+              <Panel title="Top Paid Parties">
+                <p className="small" role="status" aria-live="polite">Loading parties…</p>
+              </Panel>
+            </div>
+          </div>
+          <p className="small" role="status" aria-live="polite">
+            Loading financials…
+          </p>
+        </div>
       ) : error || !data ? (
         <ListError message={error ?? 'Financials unavailable.'} onRetry={fetchAll} />
       ) : (
         <>
           <div className="stats">
-            <StatCard label="Total Recorded Payments" value={formatAmount(data.totalPaid)} />
-            <StatCard label="Number of Payments" value={data.paymentCount} />
-            <StatCard label="Payments This Month" value={formatAmount(data.paymentsThisMonth)} />
-            <StatCard label="Projects Covered" value={data.projectsCovered} />
+            <StatCard
+              label="Total Project Budget"
+              value={financeKpiValue(formatAmount(data.totalProjectBudget))}
+              detail={`${data.projectsCovered} projects covered`}
+            />
+            <StatCard
+              label="Total Recorded Payments"
+              value={financeKpiValue(formatAmount(data.totalPaid))}
+              detail={`${data.paymentCount} payments`}
+            />
+            <StatCard
+              label="Remaining Balance"
+              value={financeKpiValue(formatAmount(data.remainingBalance))}
+              detail="Budget minus disbursed"
+            />
+            <StatCard
+              label="Payments This Month"
+              value={financeKpiValue(formatAmount(data.paymentsThisMonth))}
+              detail={`${data.paymentsThisMonthCount} payments this month`}
+            />
           </div>
-          <div className="two-column section-space">
+          <div className="two-column">
             <div className="stack">
-              <Panel title="Totals by Project">
+              <Panel
+                title="Project Budget vs Actual Payments"
+                subtitle="Budget, disbursed, and remaining per project."
+              >
                 {!data.byProject.length ? (
-                  <p className="small">No payments recorded yet.</p>
+                  <p className="small">No project payments yet.</p>
                 ) : (
-                  data.byProject.map((entry) => (
-                    <div key={entry.projectId} className="panel-heading" style={{ marginBottom: 8 }}>
-                      <span>{entry.projectName}</span>
-                      <strong>{formatAmount(entry.totalPaid)}</strong>
-                    </div>
-                  ))
+                  data.byProject.map((entry) => {
+                    const utilization = entry.budget > 0 ? (entry.totalPaid / entry.budget) * 100 : 0;
+                    return (
+                      <div className="attention-card" key={entry.projectId}>
+                        <div className="attention-top">
+                          <div>
+                            <h3>{entry.projectName}</h3>
+                            <p>
+                              Budget {formatAmount(entry.budget)} · Paid{' '}
+                              {formatAmount(entry.totalPaid)} · Remaining{' '}
+                              {formatAmount(entry.remaining)}
+                            </p>
+                            {entry.currentStageName && (
+                              <p>Current Stage: {entry.currentStageName}</p>
+                            )}
+                          </div>
+                          <div className="attention-budget">
+                            <small>Utilization</small>
+                            {utilization.toFixed(1)}%
+                          </div>
+                        </div>
+                        <Progress value={Math.round(utilization)} />
+                      </div>
+                    );
+                  })
                 )}
               </Panel>
-              <Panel title="Recent Payments">
+              <Panel
+                title="Recent Payment Disbursements"
+                subtitle="Latest recorded payments across projects."
+              >
                 {!data.recentPayments.length ? (
                   <p className="small">No payments recorded yet.</p>
                 ) : (
-                  data.recentPayments.map((p) => (
-                    <div key={p.id} className="activity">
-                      <span className="activity-dot" />
-                      <div>
-                        <strong>{p.reference ?? 'Payment ' + shortId(p.id)}</strong>
-                        <p>
-                          {p.projectName} · {displayDate(p.paymentDate)}
-                        </p>
-                        <p>
-                          {p.partyName ?? 'No payee'} · {p.categoryName ?? 'Uncategorized'} ·{' '}
-                          {formatAmount(p.amount)}
-                        </p>
-                        <TextLink href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>
-                          View Payment
-                        </TextLink>
-                      </div>
-                    </div>
-                  ))
+                  <DataTable
+                    rows={data.recentPayments}
+                    searchText={(p) =>
+                      `${p.reference ?? ''} ${p.partyName ?? ''} ${p.projectName} ${p.categoryName ?? ''} ${p.description ?? ''}`
+                    }
+                    placeholder="Filter ref or party…"
+                    emptyTitle="No payments match this filter"
+                    columns={[
+                      {
+                        label: 'Date',
+                        value: (p) => displayDate(p.paymentDate),
+                        sort: (p) => p.paymentDate,
+                      },
+                      { label: 'Project', value: (p) => p.projectName },
+                      { label: 'Party', value: (p) => p.partyName ?? '—' },
+                      { label: 'Category', value: (p) => p.categoryName ?? '—' },
+                      {
+                        label: 'Amount',
+                        value: (p) => <strong>{formatAmount(p.amount)}</strong>,
+                        sort: (p) => p.amount,
+                      },
+                      { label: 'Reference', value: (p) => p.reference ?? '—' },
+                      {
+                        label: 'Actions',
+                        value: (p) => (
+                          <TextLink href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>
+                            View
+                          </TextLink>
+                        ),
+                      },
+                    ]}
+                  />
                 )}
               </Panel>
             </div>
             <div className="stack">
-              <Panel title="Totals by Category" subtitle="Cumulative recorded disbursements.">
+              <Panel title="Payments by Category" subtitle="Cumulative recorded disbursements.">
                 {!data.byCategory.length ? (
                   <p className="small">No categories found.</p>
                 ) : (
                   <>
-                    <div
-                      className="allocation-bar"
-                      role="img"
-                      aria-label="Spending by category"
-                    >
+                    <div className="allocation-bar" role="img" aria-label="Spending by category">
                       {data.byCategory.map((c) => (
                         <span
                           key={c.categoryId}
@@ -1208,14 +1316,39 @@ export function FinanceWorkspaceOverview() {
                       ))}
                     </div>
                     <div className="allocation-legend">
-                      {data.byCategory.map((c) => (
-                        <div key={c.categoryId}>
-                          {c.categoryName}
-                          <strong>{formatAmount(c.totalPaid)}</strong>
-                        </div>
-                      ))}
+                      {data.byCategory.map((c) => {
+                        const pct = data.totalPaid > 0 ? (c.totalPaid / data.totalPaid) * 100 : 0;
+                        return (
+                          <div key={c.categoryId}>
+                            {c.categoryName} ({pct.toFixed(1)}%)
+                            <strong>{formatAmount(c.totalPaid)}</strong>
+                          </div>
+                        );
+                      })}
                     </div>
                   </>
+                )}
+              </Panel>
+              <Panel title="Top Paid Parties" subtitle="Largest recipients by disbursed total.">
+                {!data.topPaidParties.length ? (
+                  <p className="small">No paid parties yet.</p>
+                ) : (
+                  data.topPaidParties.slice(0, 5).map((party, index) => {
+                    const pct = data.totalPaid > 0 ? (party.totalPaid / data.totalPaid) * 100 : 0;
+                    return (
+                      <div className="activity" key={party.partyId}>
+                        <span className="activity-dot" />
+                        <div>
+                          <strong>
+                            {index + 1}. {party.partyName}
+                          </strong>
+                          <p>
+                            {formatAmount(party.totalPaid)} · {pct.toFixed(1)}% of disbursed
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </Panel>
             </div>

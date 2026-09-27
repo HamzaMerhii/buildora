@@ -695,51 +695,6 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
               </div>
             )}
           </Panel>
-          <Panel title="Critical Operational Tasks" subtitle="Overdue first, then upcoming">
-            {!criticalTasks ? (
-              <p className="small">Task data is currently unavailable.</p>
-            ) : !criticalTasks.length ? (
-              <p className="small">No open tasks for this project.</p>
-            ) : (
-              criticalTasks.map((t) => (
-                <div className="activity" key={t.id}>
-                  <span className="activity-dot" />
-                  <div>
-                    <TextLink href={'/app/tasks/' + t.id}>{t.title}</TextLink>
-                    <p>
-                      {t.stageName ?? ''} · Due {t.endDate ? displayDate(t.endDate) : '—'}
-                    </p>
-                    <p>
-                      <Badge value={t.status} />{' '}
-                      {isTaskOverdue(t.endDate, t.status) && <Badge value="Overdue" />}
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
-          </Panel>
-          <Panel title="Recent Task Activity" subtitle="Latest site field entries">
-            {!ov?.updates ? (
-              <p className="small">Task activity is currently unavailable.</p>
-            ) : !ov.updates.length ? (
-              <p className="small">No task updates logged yet.</p>
-            ) : (
-              ov.updates.map((u) => (
-                <div className="activity" key={u.id}>
-                  <span className="activity-dot" />
-                  <div>
-                    <strong>
-                      {authorName(u.userId)} · {tasksById.get(u.taskId)?.title ?? 'Task'} →{' '}
-                      {u.progress}%
-                    </strong>
-                    <p>{displayDate(u.createdAt.slice(0, 10))}</p>
-                    {u.notes && <p>{u.notes}</p>}
-                    {u.photoUrl && <img src={u.photoUrl} alt="Site progress verification" style={{ maxWidth: 220, borderRadius: 8 }} />}
-                  </div>
-                </div>
-              ))
-            )}
-          </Panel>
         </div>
         <div className="stack">
           <Panel title="Financial Snapshot" subtitle="Real recorded payments">
@@ -812,6 +767,75 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
           )}
         </div>
       </div>
+      <section className="section-space" aria-label="Project tasks">
+        <div className="panel-heading" style={{ marginBottom: 16 }}>
+          <div>
+            <h2>Project Tasks</h2>
+            <p className="small">Track critical work and the latest progress updates.</p>
+          </div>
+        </div>
+        <div className="two-grid task-grid">
+          <Panel title="Critical Operational Tasks" subtitle="Overdue first, then upcoming">
+            {!criticalTasks ? (
+              <p className="small">Task data is currently unavailable.</p>
+            ) : !criticalTasks.length ? (
+              <p className="small">No open tasks for this project.</p>
+            ) : (
+              <div className="task-scroll" role="region" aria-label="Critical operational tasks" tabIndex={0}>
+                {criticalTasks.map((t) => {
+                  const overdue = isTaskOverdue(t.endDate, t.status);
+                  return (
+                    <div className="task-row" key={t.id}>
+                      <div className="task-row-top">
+                        <TextLink href={'/app/tasks/' + t.id}>{t.title}</TextLink>
+                        <span className="task-badges">
+                          <Badge value={t.status} />
+                          {overdue && <Badge value="Overdue" />}
+                        </span>
+                      </div>
+                      <p className="small muted">
+                        {[t.stageName, `Due ${t.endDate ? displayDate(t.endDate) : '—'}`]
+                          .filter((x) => x)
+                          .join(' · ')}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Panel>
+          <Panel title="Recent Task Activity" subtitle="Latest site field entries">
+            {!ov?.updates ? (
+              <p className="small">Task activity is currently unavailable.</p>
+            ) : !ov.updates.length ? (
+              <p className="small">No task updates logged yet.</p>
+            ) : (
+              <div className="task-scroll" role="region" aria-label="Recent task activity" tabIndex={0}>
+                {ov.updates.map((u) => (
+                  <div className="activity" key={u.id}>
+                    <span className="activity-dot" />
+                    <div>
+                      <strong>
+                        {authorName(u.userId)} · {tasksById.get(u.taskId)?.title ?? 'Task'} →{' '}
+                        {u.progress}%
+                      </strong>
+                      <p>{displayDate(u.createdAt.slice(0, 10))}</p>
+                      {u.notes && <p>{u.notes}</p>}
+                      {u.photoUrl && (
+                        <img
+                          className="activity-thumb"
+                          src={u.photoUrl}
+                          alt={`Site progress verification for ${tasksById.get(u.taskId)?.title ?? 'task'}`}
+                        />
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
+      </section>
     </>
   );
 }
@@ -1372,24 +1396,28 @@ function BuildingBlock({
       ) : (
         floors.map((f) => (
           <div className="structure-floor" key={f.id}>
-            <span>
-              <strong>{f.name ?? `Floor ${f.number}`}</strong>
-              <small className="muted" style={{ display: 'block' }}>
-                Level {f.number}
-                {f.description ? ` · ${f.description}` : ''}
-              </small>
-            </span>
-            {canMutate && (
-              <Link
-                className="text-link"
-                style={{ marginLeft: 'auto' }}
-                href={'/app/buildings/' + b.id + '/floors/' + f.id + '/edit?projectId=' + projectId}
-              >
-                Edit Floor
-              </Link>
-            )}
+            <div className="floor-head">
+              <span className="floor-index" aria-hidden="true">
+                {String(f.number).padStart(2, '0')}
+              </span>
+              <span className="floor-title">
+                <strong>{f.name ?? `Floor ${f.number}`}</strong>
+                <small className="muted">
+                  Level {f.number}
+                  {f.description ? ` · ${f.description}` : ''}
+                </small>
+              </span>
+              {canMutate && (
+                <Link
+                  className="text-link"
+                  href={'/app/buildings/' + b.id + '/floors/' + f.id + '/edit?projectId=' + projectId}
+                >
+                  Edit Floor
+                </Link>
+              )}
+            </div>
             {canReadApartments && apartmentsByFloor.has(f.id) && (
-              <div style={{ flexBasis: '100%', marginTop: 8 }}>
+              <div className="floor-units">
                 <FloorApartmentCards apartments={apartmentsByFloor.get(f.id) ?? []} />
               </div>
             )}

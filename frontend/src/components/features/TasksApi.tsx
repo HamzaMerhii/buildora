@@ -103,6 +103,22 @@ export function resolveUpdateAuthorName(
   return `Former member ${shortId(userId)}`;
 }
 
+function authorInitials(name: string): string {
+  const parts = name.split(' ').filter(Boolean);
+  if (!parts.length) return '–';
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+}
+
+function displayTime(value: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
 export function resolvePartyLabel(
   task: Pick<ApiTask, 'partyId'>,
   partyNames: Map<string, string>,
@@ -477,24 +493,67 @@ export function TaskWorkspaceDetail({
               <Progress value={t.progress} />
             </div>
           </Panel>
-          <Panel title="Task Updates" subtitle="Sequential log of site field entries">
+          <Panel
+            title="Task Updates"
+            subtitle="Progress history and site evidence"
+            action={
+              updates.length ? (
+                <span className="small muted">
+                  {updates.length} update{updates.length === 1 ? '' : 's'}
+                </span>
+              ) : undefined
+            }
+          >
             {!updates.length ? (
-              <p className="small">No updates logged yet.</p>
+              <>
+                <p className="small">No updates logged yet.</p>
+                <p className="small muted">Add the first progress update to start the activity log.</p>
+              </>
             ) : (
-              updates.map((u) => (
-                <div className="activity" key={u.id}>
-                  <span className="activity-dot" />
-                  <div>
-                    <strong>
-                      {resolveUpdateAuthorName(u.userId, membersByUserId, sessionUser)}{' '}
-                      · Progress → {u.progress}%
-                    </strong>
-                    <p>{displayDate(u.createdAt)}</p>
-                    <p>{u.notes}</p>
-                    {u.photoUrl && <img src={u.photoUrl} alt="Site progress verification" />}
-                  </div>
-                </div>
-              ))
+              <ol className="update-timeline">
+                {updates.map((u, index) => {
+                  const author = resolveUpdateAuthorName(u.userId, membersByUserId, sessionUser);
+                  const member = membersByUserId.get(u.userId);
+                  const role = member ? companyRoleLabel[member.role] : undefined;
+                  const taskTitle = t.title;
+                  return (
+                    <li className={'update-item' + (index === 0 ? ' is-latest' : '')} key={u.id}>
+                      <span className="update-dot" aria-hidden="true" />
+                      <div className="update-card">
+                        <div className="update-head">
+                          <span className="update-avatar" aria-hidden="true">
+                            {authorInitials(author)}
+                          </span>
+                          <div>
+                            <strong>{author}</strong>
+                            {role && <span className="small muted">{role}</span>}
+                          </div>
+                          <time className="small muted" dateTime={u.createdAt}>
+                            {displayDate(u.createdAt)}
+                            {displayTime(u.createdAt) ? ` · ${displayTime(u.createdAt)}` : ''}
+                          </time>
+                          {index === 0 && (
+                            <span className="badge info">Latest update</span>
+                          )}
+                        </div>
+                        <p className="update-progress">
+                          <span className="small muted">Progress updated to</span>{' '}
+                          <strong>{u.progress}%</strong>
+                        </p>
+                        <Progress value={u.progress} />
+                        {u.notes && <p className="update-note">{u.notes}</p>}
+                        {u.photoUrl && (
+                          <img
+                            className="update-photo"
+                            src={u.photoUrl}
+                            alt={`Site progress verification for ${taskTitle}`}
+                          />
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
             )}
           </Panel>
         </div>

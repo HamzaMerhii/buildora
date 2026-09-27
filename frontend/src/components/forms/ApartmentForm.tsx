@@ -30,15 +30,76 @@ import { ConfirmDialog } from "../ui/Dialog";
 import {
   Field,
   Textarea,
-  FormActions,
-  NumberedSection,
 } from "./FormPrimitives";
+import { WizardNav, WizardStepPanel, WizardFooter } from "./FormWizard";
+import {
+  findFirstInvalidStep,
+  focusFirstField,
+  handleWizardEnterKey,
+  type WizardStepDef,
+} from "@/lib/wizard";
+
+/**
+ * Apartment wizard steps mirror the 7 original sections 1:1.
+ * S1 differs by mode: create validates the hierarchy cascade,
+ * edit shows read-only context and validates nothing.
+ */
+function getApartmentWizardSteps(isEdit: boolean): WizardStepDef[] {
+  return [
+    {
+      id: "location",
+      title: "Location in Structure",
+      micro: "HIERARCHY",
+      description: "Asset placement within the project hierarchy",
+      fields: isEdit ? [] : ["projectId", "buildingId", "floorId"],
+    },
+    {
+      id: "info",
+      title: "Apartment Information",
+      micro: "CORE IDENTIFIERS",
+      fields: ["number", "description"],
+    },
+    {
+      id: "area",
+      title: "Area & Rooms",
+      micro: "METRICS",
+      fields: ["area", "bedrooms", "bathrooms"],
+    },
+    {
+      id: "price",
+      title: "Price & Valuation",
+      micro: "FINANCIALS",
+      fields: ["price"],
+    },
+    {
+      id: "status",
+      title: "Inventory Status",
+      micro: "LIFECYCLE PHASE",
+      fields: ["status"],
+    },
+    {
+      id: "visibility",
+      title: "Public Visibility",
+      micro: "VISIBILITY CONTROL",
+      fields: ["isPublic"],
+    },
+    {
+      id: "images",
+      title: "Apartment Images",
+      micro: "MEDIA",
+      description: isEdit
+        ? "Current photos and new uploads. JPEG, PNG or WEBP; you may select several."
+        : "Optional photos for the new apartment. JPEG, PNG or WEBP; you may select several.",
+      fields: ["images"],
+    },
+  ];
+}
 
 /** Card-based inventory status selector (radio semantics, same `status` field). */
 const APARTMENT_STATUS_OPTIONS = [
   { value: 'AVAILABLE', title: 'Available', description: 'Available for assignment or sale.', dot: '#22c55e' },
   { value: 'RESERVED', title: 'Reserved', description: 'Currently reserved.', dot: '#f59e0b' },
-  { value: 'SOLD', title: 'Sold', description: 'Marked as sold.', dot: '#64748b' },
+  { value: 'SOLD', title: 'Sold', description: 'Marked as sold.', dot: '#697A98' },
 ] as const;
 
 function ApartmentStatusCards() {
@@ -56,28 +117,28 @@ function ApartmentStatusCards() {
               key={o.value}
               style={{
                 display: 'flex', flexDirection: 'column', gap: 8, padding: 16, borderRadius: 10,
-                border: selected ? '1.5px solid var(--amber)' : '1px solid var(--line)',
-                background: selected ? '#f59e0b14' : '#fff', cursor: 'pointer',
+                border: selected ? '1.5px solid var(--primary)' : '1px solid var(--line)',
+                background: selected ? '#4675C014' : '#fff', cursor: 'pointer',
                 transition: 'border-color .15s, background .15s',
-                outline: focused === o.value ? '2px solid var(--amber)' : 'none', outlineOffset: 3,
+                outline: focused === o.value ? '2px solid var(--primary)' : 'none', outlineOffset: 3,
                 minHeight: 118,
               }}
             >
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span
                   aria-hidden="true"
-                  style={{ width: 12, height: 12, borderRadius: '50%', background: selected ? o.dot : '#c0c6db' }}
+                  style={{ width: 12, height: 12, borderRadius: '50%', background: selected ? o.dot : 'var(--mist)' }}
                 />
                 <span
                   aria-hidden="true"
                   style={{
                     width: 18, height: 18, borderRadius: '50%',
-                    border: selected ? '1.5px solid var(--amber)' : '1.5px solid #c0c6db',
+                    border: selected ? '1.5px solid var(--primary)' : '1.5px solid var(--mist)',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     background: '#fff', flexShrink: 0,
                   }}
                 >
-                  {selected && <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--amber)' }} />}
+                  {selected && <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--primary)' }} />}
                 </span>
                 <input
                   type="radio"
@@ -231,6 +292,10 @@ export function ApartmentForm({ id }: { id?: string }) {
   // files against the shared image rule explicitly (PATCH itself has no
   // image field). Neither schema has currency (no backend column).
   const schema = id ? apartmentEditSchema : apartmentApiSchema;
+  const isEdit = Boolean(id);
+  const steps = getApartmentWizardSteps(isEdit);
+  const [step, setStep] = useState(0);
+  const isLast = step === steps.length - 1;
 
   const resolveChain = useCallback(async () => {
     if (!id) return;
@@ -289,6 +354,7 @@ export function ApartmentForm({ id }: { id?: string }) {
       status: 'AVAILABLE',
       isPublic: false,
     },
+    shouldUnregister: false,
   });
 
   const projectId = useWatch({ control: form.control, name: 'projectId' });
@@ -445,6 +511,114 @@ export function ApartmentForm({ id }: { id?: string }) {
     }
   };
 
+  /** Validate only the current step's fields; advance exactly one step. */
+  const handleNext = async () => {
+    const fields = steps[step].fields;
+    if (fields.length === 0) {
+      setStep((s) => Math.min(s + 1, steps.length - 1));
+      return;
+    }
+    const triggerStep = form.trigger as (names: string[]) => Promise<boolean>;
+    const valid = await triggerStep(fields);
+    if (!valid) {
+      const invalid = fields.filter((name) => form.getFieldState(name as never).invalid);
+      focusFirstField(invalid.length ? invalid : fields);
+      return;
+    }
+    setStep((s) => Math.min(s + 1, steps.length - 1));
+  };
+
+  const handleBack = () => {
+    setStep((s) => Math.max(s - 1, 0));
+  };
+
+  const submitValid = async (v: z.output<typeof schema>) => {
+    if (!companyId) {
+      setBackendError('No company context. Please sign in again.');
+      return;
+    }
+    setBackendError(null);
+    try {
+      if (id && chain) {
+        await updateApartment(
+          companyId,
+          chain.projectId,
+          chain.buildingId,
+          chain.floorId,
+          id,
+          mapApartmentFormToUpdate(v),
+        );
+        if (selectedFiles.length) {
+          const filesError = validateNewFiles(
+            (() => {
+              const transfer = new DataTransfer();
+              selectedFiles.forEach((f) => transfer.items.add(f));
+              return transfer.files;
+            })(),
+          );
+          if (filesError) {
+            setNewImagesError(filesError);
+            setBackendError(filesError);
+            return;
+          }
+          await addApartmentImages(
+            companyId,
+            chain.projectId,
+            chain.buildingId,
+            chain.floorId,
+            id,
+            selectedFiles,
+          );
+        }
+        notify('Apartment saved successfully.');
+        router.push('/app/apartments/' + id);
+      } else {
+        const target = {
+          projectId: v.projectId,
+          buildingId: v.buildingId,
+          floorId: v.floorId,
+        };
+        if (!target.projectId || !target.buildingId || !target.floorId) {
+          setBackendError('Choose a project, building and floor.');
+          return;
+        }
+        const created = await createApartment(
+          companyId,
+          target.projectId,
+          target.buildingId,
+          target.floorId,
+          mapApartmentFormToCreate(v),
+        );
+        notify('Apartment saved successfully.');
+        router.push('/app/apartments/' + created.id);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.fields) {
+        for (const [field, messages] of Object.entries(error.fields)) {
+          if (field === 'unit_number') form.setError('number', { message: messages[0] });
+          else if (field === 'area_sqm') form.setError('area', { message: messages[0] });
+          else if (field === 'is_public') form.setError('isPublic', { message: messages[0] });
+          else if (field in v) form.setError(field as keyof typeof v, { message: messages[0] });
+        }
+      }
+      if (error instanceof ApiError && error.status === 409) {
+        form.setError('number', { message: error.detail });
+      }
+      setBackendError(friendlyMessage(error));
+    }
+  };
+
+  const submitInvalid = (errors: Record<string, unknown>) => {
+    const idx = findFirstInvalidStep(steps, errors);
+    if (idx >= 0) {
+      setStep(idx);
+      window.setTimeout(() => {
+        const stepFields = steps[idx].fields;
+        focusFirstField(stepFields.filter((name) => errors[name] !== undefined));
+      }, 60);
+    }
+  };
+
   if (id && chainLoading) {
     return (
       <p className="small" role="status" aria-live="polite">
@@ -465,6 +639,171 @@ export function ApartmentForm({ id }: { id?: string }) {
     );
   }
 
+  const cancel = () => router.push('/app/apartments');
+
+  const renderStepFields = () => {
+    switch (steps[step].id) {
+      case 'location':
+        return id && chain ? (
+          <>
+            <DetailList
+              items={[
+                ['Project', chain.projectName ?? chain.projectId],
+                ['Building', chain.buildingName ?? chain.buildingId],
+                ['Floor', chain.floorName ?? chain.floorId],
+              ]}
+            />
+            <p className="small">Structural placement cannot be changed after creation.</p>
+          </>
+        ) : (
+          <>
+            <Field name="projectId" label="Project *">
+              <option value="">Select project</option>
+              {projects.map((p) => (
+                <option value={p.id} key={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Field>
+            <div className="form-grid">
+              <Field name="buildingId" label="Building *">
+                <option value="">Select building</option>
+                {buildings.map((b) => (
+                  <option value={b.id} key={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Field>
+              <Field name="floorId" label="Floor *">
+                <option value="">Select floor</option>
+                {floors.map((f) => (
+                  <option value={f.id} key={f.id}>
+                    {f.name ?? `Floor ${f.number}`}
+                  </option>
+                ))}
+              </Field>
+            </div>
+            <p className="small section-space">
+              Apartments must belong to a valid project, building, and floor hierarchy.
+            </p>
+          </>
+        );
+      case 'info':
+        return (
+          <>
+            <Field
+              name="number"
+              label="Apartment Number *"
+              placeholder="e.g. 201"
+              hint="Unique unit identifier within the selected floor."
+            />
+            <div className="section-space">
+              <Textarea
+                name="description"
+                label="Description"
+                placeholder="e.g. Bright corner unit with balcony access…"
+              />
+            </div>
+          </>
+        );
+      case 'area':
+        return (
+          <div className="apt-metrics">
+            <Field
+              name="area"
+              label="Area (sqm) *"
+              type="number"
+              step="any"
+            />
+            <Field name="bedrooms" label="Bedrooms *" type="number" />
+            <Field name="bathrooms" label="Bathrooms *" type="number" />
+          </div>
+        );
+      case 'price':
+        return (
+          <Field
+            name="price"
+            label="Base Price *"
+            type="number"
+            step="any"
+          />
+        );
+      case 'status':
+        return <ApartmentStatusCards />;
+      case 'visibility':
+        return (
+          <>
+            <VisibilitySwitch />
+            <p className="small section-space">
+              Private apartments are available only in your internal workspace.
+            </p>
+          </>
+        );
+      case 'images':
+        return !id ? (
+          <NewImagesPicker
+            inputId={imagesInputId}
+            inputRef={fileInputRef}
+            previewUrls={previewUrls}
+            hasSelection={selectedFiles.length > 0}
+            imageError={imageError}
+            onSelect={handleImagesChange}
+            onRemove={removeImage}
+          />
+        ) : (
+          <>
+            {existingImages.length > 0 ? (
+              <div className="three-grid">
+                {existingImages.map((img) => (
+                  <div key={img.id} className="stack">
+                    <img src={img.url} alt="Current apartment photo" style={{ borderRadius: 8 }} />
+                    <div>
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() => setPendingDeleteId(img.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="small">No images yet. Add some below.</p>
+            )}
+            <div className="section-space">
+              <NewImagesPicker
+                inputId={imagesInputId}
+                inputRef={fileInputRef}
+                previewUrls={previewUrls}
+                hasSelection={selectedFiles.length > 0}
+                imageError={newImagesError ?? undefined}
+                onSelect={handleImagesChange}
+                onRemove={removeImage}
+              />
+            </div>
+            <ConfirmDialog
+              open={pendingDeleteId !== null}
+              onClose={() => setPendingDeleteId(null)}
+              onConfirm={confirmDeleteImage}
+              title="Delete apartment image?"
+              description="This removes the photo from the apartment. This cannot be undone."
+            />
+            {deletingImage && (
+              <p className="small" role="status" aria-live="polite">
+                Deleting image…
+              </p>
+            )}
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const current = steps[step];
+
   return (
     <div className="form-layout">
       <PageHeader
@@ -479,254 +818,26 @@ export function ApartmentForm({ id }: { id?: string }) {
       <FormProvider {...form}>
         <form
           noValidate
-          onSubmit={form.handleSubmit(async (v) => {
-            if (!companyId) {
-              setBackendError('No company context. Please sign in again.');
-              return;
-            }
-            setBackendError(null);
-            try {
-              if (id && chain) {
-                await updateApartment(
-                  companyId,
-                  chain.projectId,
-                  chain.buildingId,
-                  chain.floorId,
-                  id,
-                  mapApartmentFormToUpdate(v),
-                );
-                if (selectedFiles.length) {
-                  const filesError = validateNewFiles(
-                    (() => {
-                      const transfer = new DataTransfer();
-                      selectedFiles.forEach((f) => transfer.items.add(f));
-                      return transfer.files;
-                    })(),
-                  );
-                  if (filesError) {
-                    setNewImagesError(filesError);
-                    setBackendError(filesError);
-                    return;
-                  }
-                  await addApartmentImages(
-                    companyId,
-                    chain.projectId,
-                    chain.buildingId,
-                    chain.floorId,
-                    id,
-                    selectedFiles,
-                  );
-                }
-                notify('Apartment saved successfully.');
-                router.push('/app/apartments/' + id);
-              } else {
-                const target = {
-                  projectId: v.projectId,
-                  buildingId: v.buildingId,
-                  floorId: v.floorId,
-                };
-                if (!target.projectId || !target.buildingId || !target.floorId) {
-                  setBackendError('Choose a project, building and floor.');
-                  return;
-                }
-                const created = await createApartment(
-                  companyId,
-                  target.projectId,
-                  target.buildingId,
-                  target.floorId,
-                  mapApartmentFormToCreate(v),
-                );
-                notify('Apartment saved successfully.');
-                router.push('/app/apartments/' + created.id);
-              }
-            } catch (error) {
-              if (error instanceof ApiError && error.fields) {
-                for (const [field, messages] of Object.entries(error.fields)) {
-                  if (field === 'unit_number') form.setError('number', { message: messages[0] });
-                  else if (field === 'area_sqm') form.setError('area', { message: messages[0] });
-                  else if (field === 'is_public') form.setError('isPublic', { message: messages[0] });
-                  else if (field in v) form.setError(field as keyof typeof v, { message: messages[0] });
-                }
-              }
-              if (error instanceof ApiError && error.status === 409) {
-                form.setError('number', { message: error.detail });
-              }
-              setBackendError(friendlyMessage(error));
-            }
-          })}
+          onSubmit={form.handleSubmit(submitValid, submitInvalid)}
+          onKeyDown={(e) => handleWizardEnterKey(e, isLast, () => void handleNext())}
         >
-          <NumberedSection number="1"
-            title="Location in Structure"
-            micro="HIERARCHY"
-            description="Asset placement within the project hierarchy"
-          >
-            {id && chain ? (
-              <>
-                <DetailList
-                  items={[
-                    ['Project', chain.projectName ?? chain.projectId],
-                    ['Building', chain.buildingName ?? chain.buildingId],
-                    ['Floor', chain.floorName ?? chain.floorId],
-                  ]}
-                />
-                <p className="small">Structural placement cannot be changed after creation.</p>
-              </>
-            ) : (
-              <>
-                <Field name="projectId" label="Project *">
-                  <option value="">Select project</option>
-                  {projects.map((p) => (
-                    <option value={p.id} key={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </Field>
-                <div className="form-grid">
-                  <Field name="buildingId" label="Building *">
-                    <option value="">Select building</option>
-                    {buildings.map((b) => (
-                      <option value={b.id} key={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </Field>
-                  <Field name="floorId" label="Floor *">
-                    <option value="">Select floor</option>
-                    {floors.map((f) => (
-                      <option value={f.id} key={f.id}>
-                        {f.name ?? `Floor ${f.number}`}
-                      </option>
-                    ))}
-                  </Field>
-                </div>
-                <p className="small section-space">
-                  Apartments must belong to a valid project, building, and floor hierarchy.
-                </p>
-              </>
-            )}
-          </NumberedSection>
-          <NumberedSection number="2" title="Apartment Information" micro="CORE IDENTIFIERS">
-            <Field
-              name="number"
-              label="Apartment Number *"
-              placeholder="e.g. 201"
-              hint="Unique unit identifier within the selected floor."
-            />
-            <div className="section-space">
-              <Textarea
-                name="description"
-                label="Description"
-                placeholder="e.g. Bright corner unit with balcony access…"
-              />
-            </div>
-          </NumberedSection>
-          <NumberedSection number="3" title="Area & Rooms" micro="METRICS">
-            <div className="apt-metrics">
-              <Field
-                name="area"
-                label="Area (sqm) *"
-                type="number"
-                step="any"
-              />
-              <Field name="bedrooms" label="Bedrooms *" type="number" />
-              <Field name="bathrooms" label="Bathrooms *" type="number" />
-            </div>
-          </NumberedSection>
-          <NumberedSection number="4" title="Price & Valuation" micro="FINANCIALS">
-            <Field
-              name="price"
-              label="Base Price *"
-              type="number"
-              step="any"
-            />
-          </NumberedSection>
-          <NumberedSection number="5" title="Inventory Status" micro="LIFECYCLE PHASE">
-            <ApartmentStatusCards />
-          </NumberedSection>
-          <NumberedSection number="6" title="Public Visibility" micro="VISIBILITY CONTROL">
-            <VisibilitySwitch />
-            <p className="small section-space">
-              Private apartments are available only in your internal workspace.
-            </p>
-          </NumberedSection>
-          {!id ? (
-            <NumberedSection number="7"
-              title="Apartment Images"
-              micro="MEDIA"
-              description="Optional photos for the new apartment. JPEG, PNG or WEBP; you may select several."
-            >
-              <NewImagesPicker
-                inputId={imagesInputId}
-                inputRef={fileInputRef}
-                previewUrls={previewUrls}
-                hasSelection={selectedFiles.length > 0}
-                imageError={imageError}
-                onSelect={handleImagesChange}
-                onRemove={removeImage}
-              />
-            </NumberedSection>
-          ) : (
-            <>
-              <NumberedSection number="7"
-                title="Apartment Images"
-                micro="MEDIA"
-                description="Current photos and new uploads. JPEG, PNG or WEBP; you may select several."
-              >
-                {existingImages.length > 0 ? (
-                  <div className="three-grid">
-                    {existingImages.map((img) => (
-                      <div key={img.id} className="stack">
-                        <img src={img.url} alt="Current apartment photo" style={{ borderRadius: 8 }} />
-                        <div>
-                          <button
-                            className="button secondary"
-                            type="button"
-                            onClick={() => setPendingDeleteId(img.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="small">No images yet. Add some below.</p>
-                )}
-                <div className="section-space">
-                  <NewImagesPicker
-                    inputId={imagesInputId}
-                    inputRef={fileInputRef}
-                    previewUrls={previewUrls}
-                    hasSelection={selectedFiles.length > 0}
-                    imageError={newImagesError ?? undefined}
-                    onSelect={handleImagesChange}
-                    onRemove={removeImage}
-                  />
-                </div>
-              </NumberedSection>
-              <ConfirmDialog
-                open={pendingDeleteId !== null}
-                onClose={() => setPendingDeleteId(null)}
-                onConfirm={confirmDeleteImage}
-                title="Delete apartment image?"
-                description="This removes the photo from the apartment. This cannot be undone."
-              />
-              {deletingImage && (
-                <p className="small" role="status" aria-live="polite">
-                  Deleting image…
-                </p>
-              )}
-            </>
-          )}
+          <WizardNav steps={steps} step={step} onGoBack={(i) => setStep(i)} />
+          <WizardStepPanel key={current.id} step={current}>
+            {renderStepFields()}
+          </WizardStepPanel>
           {backendError && (
             <p className="field-error" role="alert">
               {backendError}
             </p>
           )}
-          <FormActions
-            onCancel={() => router.push('/app/apartments')}
-            label={id ? 'Save Changes' : 'Create Apartment'}
-            pending={form.formState.isSubmitting}
+          <WizardFooter
+            step={step}
+            totalSteps={steps.length}
+            submitLabel={id ? 'Save Changes' : 'Create Apartment'}
+            submitPending={form.formState.isSubmitting}
+            onBack={handleBack}
+            onCancel={cancel}
+            onNext={() => void handleNext()}
           />
         </form>
       </FormProvider>

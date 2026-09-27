@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { projectCreateSchema, projectEditSchema, projectSchema } from '@/lib/validations/project.schema';
+import { getProjectWizardSteps, findFirstInvalidStep } from '@/lib/validations/project-wizard';
 import { useAuthStore } from '@/stores/auth.store';
 import {
   createProject,
@@ -17,7 +18,9 @@ import {
 import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { useWorkspace } from '../features/WorkspaceProvider';
 import { PageHeader, EmptyState } from '../ui/Primitives';
-import { Field, Textarea, FormActions, NumberedSection } from './FormPrimitives';
+import { Field, Textarea } from './FormPrimitives';
+import { WizardNav, WizardStepPanel, WizardFooter } from './FormWizard';
+import { focusFirstField, handleWizardEnterKey } from '@/lib/wizard';
 
 type FormInput = z.input<typeof projectSchema>;
 
@@ -90,9 +93,9 @@ function NewImagePicker({
 
 /** Card-based project status selector (radio semantics, same `status` field). */
 const PROJECT_STATUS_OPTIONS = [
-  { value: 'PLANNING', title: 'Planning', description: 'Recommended for design and permit review', dot: '#6366f1' },
+  { value: 'PLANNING', title: 'Planning', description: 'Recommended for design and permit review', dot: '#4675C0' },
   { value: 'IN_PROGRESS', title: 'In Progress', description: 'Active site mobilization and works', dot: '#f59e0b' },
-  { value: 'ON_HOLD', title: 'On Hold', description: 'Awaiting clearances, financing, or restart', dot: '#94a3b8' },
+  { value: 'ON_HOLD', title: 'On Hold', description: 'Awaiting clearances, financing, or restart', dot: '#697A98' },
   { value: 'COMPLETED', title: 'Completed', description: 'Final handover and project completion', dot: '#22c55e' },
 ] as const;
 
@@ -114,28 +117,28 @@ function ProjectStatusCards() {
               key={o.value}
               style={{
                 display: 'flex', flexDirection: 'column', gap: 8, padding: 16, borderRadius: 10,
-                border: selected ? '1.5px solid var(--amber)' : '1px solid var(--line)',
-                background: selected ? '#f59e0b14' : '#fff', cursor: 'pointer',
+                border: selected ? '1.5px solid var(--primary)' : '1px solid var(--line)',
+                background: selected ? '#4675C014' : '#fff', cursor: 'pointer',
                 transition: 'border-color .15s, background .15s',
-                outline: focused === o.value ? '2px solid var(--amber)' : 'none', outlineOffset: 3,
+                outline: focused === o.value ? '2px solid var(--primary)' : 'none', outlineOffset: 3,
                 minHeight: 118,
               }}
             >
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span
                   aria-hidden="true"
-                  style={{ width: 12, height: 12, borderRadius: '50%', background: selected ? o.dot : '#c0c6db' }}
+                  style={{ width: 12, height: 12, borderRadius: '50%', background: selected ? o.dot : 'var(--mist)' }}
                 />
                 <span
                   aria-hidden="true"
                   style={{
                     width: 18, height: 18, borderRadius: '50%',
-                    border: selected ? '1.5px solid var(--amber)' : '1.5px solid #c0c6db',
+                    border: selected ? '1.5px solid var(--primary)' : '1.5px solid var(--mist)',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     background: '#fff', flexShrink: 0,
                   }}
                 >
-                  {selected && <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--amber)' }} />}
+                  {selected && <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--primary)' }} />}
                 </span>
                 <input
                   type="radio"
@@ -174,6 +177,7 @@ export function ProjectForm({ id }: { id?: string }) {
   const [loading, setLoading] = useState(!!id);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [step, setStep] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputId = useId();
 
@@ -181,6 +185,8 @@ export function ProjectForm({ id }: { id?: string }) {
   // payload) plus an optional replacement image; create uses the
   // backend-compatible schema without currency.
   const schema = id ? projectEditSchema : projectCreateSchema;
+  const steps = getProjectWizardSteps(Boolean(id));
+  const isLast = step === steps.length - 1;
 
   const fetchDetail = useCallback(async () => {
     if (!id) return;
@@ -214,10 +220,13 @@ export function ProjectForm({ id }: { id?: string }) {
   }, [fetchDetail]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // One form instance for the whole wizard. shouldUnregister: false keeps
+  // hidden steps' values in the final submission.
   const form = useForm<z.input<typeof schema>, unknown, z.output<typeof schema>>({
     resolver: zodResolver(schema),
     values: initialValues,
     defaultValues: CREATE_DEFAULTS,
+    shouldUnregister: false,
   });
 
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -236,6 +245,7 @@ export function ProjectForm({ id }: { id?: string }) {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const imageError = (form.formState.errors as { image?: { message?: string } }).image?.message;
+  const isSubmitting = form.formState.isSubmitting;
 
   const handleImageChange = (files: FileList | null) => {
     form.setValue('image' as never, (files ?? undefined) as never, {
@@ -249,6 +259,72 @@ export function ProjectForm({ id }: { id?: string }) {
     form.setValue('image' as never, undefined as never, { shouldValidate: true, shouldDirty: true });
     setSelectedImage(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  /** Validate only the current step's fields; advance exactly one step. */
+  const handleNext = async () => {
+    const triggerStep = form.trigger as (names: string[]) => Promise<boolean>;
+    const valid = await triggerStep(steps[step].fields);
+    if (!valid) {
+      const invalid = steps[step].fields.filter((name) => form.getFieldState(name as never).invalid);
+      focusFirstField(invalid.length ? invalid : steps[step].fields);
+      return;
+    }
+    setStep((s) => Math.min(s + 1, steps.length - 1));
+  };
+
+  const handleBack = () => {
+    setStep((s) => Math.max(s - 1, 0));
+  };
+
+  const submitValid = async (v: z.output<typeof schema>) => {
+    if (!companyId) {
+      setBackendError('No company context. Please sign in again.');
+      return;
+    }
+    setBackendError(null);
+    try {
+      if (id) {
+        // `currency` is UI-only (no backend column). A newly
+        // selected image is uploaded via multipart PATCH; with no
+        // new file the `image` part is omitted and the existing
+        // image is preserved.
+        await updateProject(companyId, id, mapProjectFormToUpdate(v));
+        notify('Project changes saved.');
+        router.push('/app/projects/' + id);
+      } else {
+        // Backend create returns {message} only (no project ID),
+        // so the safe flow is back to the refreshed list.
+        await createProject(companyId, mapProjectFormToCreate(v));
+        notify('Project created successfully.');
+        router.push('/app/projects');
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.fields) {
+        const names = Object.keys(error.fields);
+        for (const [field, messages] of Object.entries(error.fields)) {
+          if (field in v) form.setError(field as keyof typeof v, { message: messages[0] });
+        }
+        // Jump to the first step holding a backend-rejected field.
+        const idx = findFirstInvalidStep(
+          Object.fromEntries(names.map((name) => [name, true])),
+          Boolean(id),
+        );
+        if (idx >= 0) setStep(idx);
+      }
+      setBackendError(friendlyMessage(error));
+    }
+  };
+
+  const submitInvalid = (errors: Record<string, unknown>) => {
+    const idx = findFirstInvalidStep(errors, Boolean(id));
+    if (idx >= 0) {
+      setStep(idx);
+      window.setTimeout(() => {
+        const stepFields = getProjectWizardSteps(Boolean(id))[idx].fields;
+        focusFirstField(stepFields.filter((name) => errors[name] !== undefined));
+      }, 60);
+    }
   };
 
   if (id && loading) {
@@ -273,6 +349,95 @@ export function ProjectForm({ id }: { id?: string }) {
 
   const cancel = () => router.push(id ? '/app/projects/' + id : '/app/projects');
 
+  const renderStepFields = () => {
+    switch (steps[step].id) {
+      case 'details':
+        return (
+          <>
+            <Field name="name" label="Project Name *" placeholder="e.g. Cedar Residence" />
+            <Textarea
+              name="description"
+              label="Description"
+              placeholder="Construction scope, architectural style, and delivery goals…"
+            />
+          </>
+        );
+      case 'location':
+        return (
+          <Field
+            name="location"
+            label="Location / Site Address *"
+            placeholder="e.g. Beirut, Lebanon (Plot 4412/Achrafieh)"
+          />
+        );
+      case 'timeline':
+        return (
+          <div className="form-grid">
+            <Field name="startDate" label="Start Date *" type="date" />
+            <Field name="endDate" label="Expected End Date *" type="date" />
+          </div>
+        );
+      case 'budget':
+        return id ? (
+          <div className="form-grid">
+            <Field
+              name="budget"
+              label="Total Approved Budget *"
+              type="number"
+              step="any"
+              placeholder="500000"
+            />
+            <Field name="currency" label="Currency *">
+              <option value="USD">USD ($) — US Dollar</option>
+              <option value="LBP">LBP — Lebanese Pound</option>
+              <option value="EUR">EUR (€) — Euro</option>
+              <option value="GBP">GBP (£)</option>
+              <option value="AED">AED</option>
+              <option value="SAR">SAR</option>
+            </Field>
+          </div>
+        ) : (
+          <Field
+            name="budget"
+            label="Total Approved Budget *"
+            type="number"
+            step="any"
+            placeholder="500000"
+          />
+        );
+      case 'status':
+        return <ProjectStatusCards />;
+      case 'image':
+        return (
+          <>
+            {id && currentImage && (
+              <div className="stack">
+                <img
+                  src={currentImage}
+                  alt="Current project image"
+                  style={{ maxWidth: 320, borderRadius: 8 }}
+                />
+                <small>Current image — saving without a new file keeps it.</small>
+              </div>
+            )}
+            <NewImagePicker
+              inputId={imageInputId}
+              inputRef={fileInputRef}
+              previewUrl={previewUrl}
+              hasSelection={Boolean(selectedImage)}
+              imageError={imageError}
+              onSelect={handleImageChange}
+              onRemove={removeImage}
+            />
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const current = steps[step];
+
   return (
     <div className="form-layout">
       <PageHeader
@@ -287,150 +452,27 @@ export function ProjectForm({ id }: { id?: string }) {
       <FormProvider {...form}>
         <form
           noValidate
-          onSubmit={form.handleSubmit(async (v) => {
-            if (!companyId) {
-              setBackendError('No company context. Please sign in again.');
-              return;
-            }
-            setBackendError(null);
-            try {
-              if (id) {
-                // `currency` is UI-only (no backend column). A newly
-                // selected image is uploaded via multipart PATCH; with no
-                // new file the `image` part is omitted and the existing
-                // image is preserved.
-                await updateProject(companyId, id, mapProjectFormToUpdate(v));
-                notify('Project changes saved.');
-                router.push('/app/projects/' + id);
-              } else {
-                // Backend create returns {message} only (no project ID),
-                // so the safe flow is back to the refreshed list.
-                await createProject(companyId, mapProjectFormToCreate(v));
-                notify('Project created successfully.');
-                router.push('/app/projects');
-              }
-            } catch (error) {
-              if (error instanceof ApiError && error.fields) {
-                for (const [field, messages] of Object.entries(error.fields)) {
-                  if (field in v) form.setError(field as keyof typeof v, { message: messages[0] });
-                }
-              }
-              setBackendError(friendlyMessage(error));
-            }
-          })}
+          onSubmit={form.handleSubmit(submitValid, submitInvalid)}
+          onKeyDown={(e) => handleWizardEnterKey(e, isLast, () => void handleNext())}
         >
-          <NumberedSection number={1} title="Project Information" micro="GENERAL" description="Core project identity and scope">
-            <Field name="name" label="Project Name *" placeholder="e.g. Cedar Residence" />
-            <Textarea
-              name="description"
-              label="Description"
-              placeholder="Construction scope, architectural style, and delivery goals…"
-            />
-          </NumberedSection>
-          <NumberedSection number={2} title="Location" micro="SITE" description="Physical construction site">
-            <Field
-              name="location"
-              label="Location / Site Address *"
-              placeholder="e.g. Beirut, Lebanon (Plot 4412/Achrafieh)"
-            />
-          </NumberedSection>
-          <NumberedSection number={3} title="Timeline" micro="SCHEDULE" description="Planned project delivery window">
-            <div className="form-grid">
-              <Field name="startDate" label="Start Date *" type="date" />
-              <Field name="endDate" label="Expected End Date *" type="date" />
-            </div>
-          </NumberedSection>
-          {id ? (
-            <NumberedSection number={4} title="Budget & Currency" micro="FINANCIALS">
-              <div className="form-grid">
-                <Field
-                  name="budget"
-                  label="Total Approved Budget *"
-                  type="number"
-                  step="any"
-                  placeholder="500000"
-                />
-                <Field name="currency" label="Currency *">
-                  <option value="USD">USD ($) — US Dollar</option>
-                  <option value="LBP">LBP — Lebanese Pound</option>
-                  <option value="EUR">EUR (€) — Euro</option>
-                  <option value="GBP">GBP (£)</option>
-                  <option value="AED">AED</option>
-                  <option value="SAR">SAR</option>
-                </Field>
-              </div>
-            </NumberedSection>
-          ) : (
-            <NumberedSection number={4} title="Budget" micro="FINANCIALS" description="Total approved project budget in USD">
-              <Field
-                name="budget"
-                label="Total Approved Budget *"
-                type="number"
-                step="any"
-                placeholder="500000"
-              />
-            </NumberedSection>
-          )}
-          <NumberedSection
-            number={5}
-            title="Status"
-            micro="LIFECYCLE"
-            description="Set the workflow gate for resource planning and subcontractor dispatch."
-          >
-            <ProjectStatusCards />
-          </NumberedSection>
-          {!id && (
-            <NumberedSection
-              number={6}
-              title="Project Image"
-              micro="MEDIA"
-              description="Optional cover image for the new project. JPEG, PNG or WEBP."
-            >
-              <NewImagePicker
-                inputId={imageInputId}
-                inputRef={fileInputRef}
-                previewUrl={previewUrl}
-                hasSelection={Boolean(selectedImage)}
-                imageError={imageError}
-                onSelect={handleImageChange}
-                onRemove={removeImage}
-              />
-            </NumberedSection>
-          )}
-          {id && (
-            <NumberedSection
-              number={6}
-              title="Project Image"
-              micro="MEDIA"
-              description="Current cover image and optional replacement. JPEG, PNG or WEBP."
-            >
-              {currentImage && (
-                <div className="stack">
-                  <img
-                    src={currentImage}
-                    alt="Current project image"
-                    style={{ maxWidth: 320, borderRadius: 8 }}
-                  />
-                  <small>Current image — saving without a new file keeps it.</small>
-                </div>
-              )}
-              <NewImagePicker
-                inputId={imageInputId}
-                inputRef={fileInputRef}
-                previewUrl={previewUrl}
-                hasSelection={Boolean(selectedImage)}
-                imageError={imageError}
-                onSelect={handleImageChange}
-                onRemove={removeImage}
-              />
-            </NumberedSection>
-          )}
+          <WizardNav steps={steps} step={step} onGoBack={(i) => setStep(i)} />
+          <WizardStepPanel key={step} step={current}>
+            {renderStepFields()}
+          </WizardStepPanel>
           {backendError && (
             <p className="field-error" role="alert">
               {backendError}
             </p>
           )}
-          <FormActions onCancel={cancel} label={id ? 'Save Changes' : 'Create Project'} pending={form.formState.isSubmitting} />
+          <WizardFooter
+            step={step}
+            totalSteps={steps.length}
+            submitLabel={id ? 'Save Changes' : 'Create Project'}
+            submitPending={isSubmitting}
+            onBack={handleBack}
+            onCancel={cancel}
+            onNext={() => void handleNext()}
+          />
         </form>
       </FormProvider>
     </div>

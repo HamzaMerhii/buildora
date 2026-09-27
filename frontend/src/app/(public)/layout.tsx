@@ -1,2 +1,9 @@
-import { PublicShell } from '@/components/layout/PublicShell';
-export default function Layout({children}:{children:React.ReactNode}){return <PublicShell>{children}</PublicShell>;}
+import '@/styles/public.css';
+
+export default function PublicLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return <div className="buildora-public">{children}</div>;
+}

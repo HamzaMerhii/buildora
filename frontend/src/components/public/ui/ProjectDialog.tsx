@@ -1,0 +1,11 @@
+'use client';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { X, Download } from 'lucide-react';
+import GlowButton from './GlowButton';
+import { services } from '@/data/public/services';
+export default function ProjectDialog({open,onClose}:{open:boolean;onClose:()=>void}) {
+ const ref=useRef<HTMLDialogElement>(null);const [saved,setSaved]=useState(false);
+ useEffect(()=>{const dialog=ref.current;if(open){dialog?.showModal();document.body.style.overflow='hidden';}else{dialog?.close();document.body.style.overflow='';}return()=>{document.body.style.overflow='';};},[open]);
+ function download(e:FormEvent<HTMLFormElement>){e.preventDefault();const data=new FormData(e.currentTarget);const text=`PROJECT BRIEF\n\nName: ${data.get('name')}\nEmail: ${data.get('email')}\nService: ${data.get('service')}\n\n${data.get('details')}\n`;const url=URL.createObjectURL(new Blob([text],{type:'text/plain'}));const a=document.createElement('a');a.href=url;a.download='project-brief.txt';a.click();URL.revokeObjectURL(url);setSaved(true);}
+ return <dialog ref={ref} className="project-dialog" onCancel={onClose} onClick={e=>{if(e.target===e.currentTarget)onClose()}} aria-labelledby="project-title"><div className="dialog-inner"><button className="close-dialog" onClick={onClose} aria-label="Close project brief"><X/></button><h2 id="project-title">Start your project</h2><p>Bring your vision into focus.</p><form onSubmit={download}><label>Your name<input autoComplete="name" name="name" required placeholder="Full name"/></label><label>Email<input type="email" autoComplete="email" name="email" required placeholder="you@company.com"/></label><label>Service<select name="service">{services.map(s=><option key={s.title}>{s.title}</option>)}</select></label><label>What are you planning?<textarea name="details" rows={3} required placeholder="Tell us about your project, location, and timeline."/></label><p className="form-note">Save a brief to share with your project team. Your details stay on this device and are not submitted.</p><GlowButton type="submit"><Download size={15}/> Save project brief</GlowButton>{saved&&<p className="saved-message" role="status">Your project brief has been downloaded.</p>}</form></div></dialog>;
+}

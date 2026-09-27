@@ -7,7 +7,7 @@ from sqlalchemy import text
 # from app.routers import auth, users, dashboard
 from app.core.config import settings
 from app.database.db import engine, init_db
-from app.routers import apartment, auth, building, company, construction_stage, dashboard,document,floor, land_record, lead, payment, platform, payment_category, task_updates, task, party, users, project
+from app.routers import ai,apartment, auth, building, company, construction_stage, dashboard,document,floor, land_record, lead, payment, platform, payment_category, public, public_ai, task_updates, task, party, users, project
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -60,6 +60,9 @@ app.include_router(payment_category.router)
 app.include_router(lead.router)
 app.include_router(platform.router)
 app.include_router(dashboard.router)
+app.include_router(ai.router)
+app.include_router(public.router)
+app.include_router(public_ai.router)
 @app.get("/")
 async def root():
     return {

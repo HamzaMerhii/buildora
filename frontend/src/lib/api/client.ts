@@ -7,13 +7,15 @@ export class ApiError extends Error {
   status: number;
   detail: string;
   fields?: Record<string, string[]>;
+  code?: string;
 
-  constructor(status: number, detail: string, fields?: Record<string, string[]>) {
+  constructor(status: number, detail: string, fields?: Record<string, string[]>, code?: string) {
     super(detail);
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
     this.fields = fields;
+    this.code = code;
   }
 }
 
@@ -46,10 +48,21 @@ function parseFields(detail: unknown): Record<string, string[]> | undefined {
 
 async function parseError(response: Response): Promise<ApiError> {
   let detail: unknown = `Request failed with status ${response.status}`;
+  let code: string | undefined;
   try {
     const data = await response.json();
     if (typeof data?.detail === 'string' || Array.isArray(data?.detail)) {
       detail = data.detail;
+    } else if (
+      data?.detail &&
+      typeof data.detail === 'object' &&
+      !Array.isArray(data.detail)
+    ) {
+      // Structured backend errors, e.g. { detail: { code, message } }.
+      const rawCode = (data.detail as { code?: unknown }).code;
+      const rawMessage = (data.detail as { message?: unknown }).message;
+      if (typeof rawCode === 'string') code = rawCode;
+      detail = typeof rawMessage === 'string' ? rawMessage : detail;
     } else if (typeof data?.message === 'string') {
       detail = data.message;
     } else if (typeof data === 'string') {
@@ -73,7 +86,7 @@ async function parseError(response: Response): Promise<ApiError> {
     return new ApiError(response.status, first?.msg ?? 'Invalid request.', fields);
   }
 
-  return new ApiError(response.status, String(detail));
+  return new ApiError(response.status, String(detail), undefined, code);
 }
 
 export function friendlyMessage(error: unknown): string {
@@ -83,6 +96,7 @@ export function friendlyMessage(error: unknown): string {
     if (error.status === 403) return 'Your account does not have permission for this action.';
     if (error.status === 409) return error.detail || 'This email or phone is already registered.';
     if (error.status === 422) return error.detail || 'Some fields are invalid. Review and try again.';
+    if (error.status === 429) return 'Too many requests. Please wait a moment and try again.';
     return error.detail || 'Something went wrong. Please try again.';
   }
   if (error instanceof Error) return error.message;

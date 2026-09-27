@@ -44,6 +44,10 @@ import {
   mapLandRecordResponseToFrontend,
 } from "../src/lib/api/land-record.api";
 import { mapProjectFormToCreate, mapProjectFormToUpdate, mapProjectResponseToFrontend } from "../src/lib/api/project.api";
+import {
+  findFirstInvalidStep,
+  getProjectWizardSteps,
+} from "../src/lib/validations/project-wizard";
 import { apartmentSchema, apartmentSchemaForStructure } from "../src/lib/validations/apartment.schema";
 import { floorSchema } from "../src/lib/validations/floor.schema";
 import { taskSchema } from "../src/lib/validations/task.schema";
@@ -117,12 +121,15 @@ import {
 } from "../src/lib/api/platform.api";
 import {
   dashboardProjectStatusLabel,
+  financialKpiFontSize,
   mapDashboardSummaryToFrontend,
   mapDashboardTaskToFrontend,
   mapFinanceDashboardToFrontend,
   mapSalesDashboardToFrontend,
   toDashboardNumber,
 } from "../src/lib/api/dashboard.api";
+import { aiId, aiNumber, aiText } from "../src/lib/api/ai.api";
+import { assistantSchema } from "../src/lib/validations/assistant.schema";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -180,13 +187,73 @@ check(
   "project update omits image when none selected (existing preserved)",
 );
 check(
-  buildingSchema.safeParse({ name: 'Building A', description: '', projectId: 'p1' }).success,
-  "building accepts valid values",
+  getProjectWizardSteps(false).length === 6 && getProjectWizardSteps(true).length === 6,
+  "project wizard has six steps in create and edit mode",
 );
 check(
-  !buildingSchema.safeParse({ name: '  ', description: '', projectId: 'p1' }).success,
-  "building rejects blank name",
+  getProjectWizardSteps(false).map((s) => s.id).join(',') ===
+    'details,location,timeline,budget,status,image',
+  "project wizard step order mirrors form sections",
 );
+check(
+  (() => {
+    const fields = getProjectWizardSteps(false).flatMap((s) => s.fields).sort();
+    const expected = ['budget', 'description', 'endDate', 'image', 'location', 'name', 'startDate', 'status'].sort();
+    return JSON.stringify(fields) === JSON.stringify(expected);
+  })(),
+  "create wizard steps cover every create field exactly once",
+);
+check(
+  getProjectWizardSteps(true)[3].fields.join(',') === 'budget,currency' &&
+    getProjectWizardSteps(false)[3].fields.join(',') === 'budget',
+  "budget step validates currency only in edit mode",
+);
+check(
+  findFirstInvalidStep({}, false) === -1 &&
+    findFirstInvalidStep({ name: { message: 'x' } }, false) === 0 &&
+    findFirstInvalidStep({ endDate: { message: 'x' } }, false) === 2 &&
+    findFirstInvalidStep({ image: { message: 'x' } }, false) === 5 &&
+    findFirstInvalidStep({ currency: { message: 'x' } }, true) === 3,
+  "first-invalid-step mapping returns the owning step",
+);
+check(
+  projectCreateSchema.keyof().options.every((key) =>
+    getProjectWizardSteps(false).some((s) => s.fields.includes(key)),
+  ) &&
+    (['name', 'description', 'location', 'startDate', 'endDate', 'budget', 'status', 'image'] as string[]).every(
+      (key) => key in projectCreateSchema.shape,
+    ),
+  "every create schema field is validated by exactly one wizard step",
+);
+const projectFormSrc = readFileSync(
+  join(process.cwd(), "src/components/forms/ProjectForm.tsx"),
+  "utf8",
+);
+for (const real of [
+  'getProjectWizardSteps',
+  'shouldUnregister: false',
+  'findFirstInvalidStep',
+  'form.trigger',
+  'type="button"',
+]) {
+  check(
+    projectFormSrc.includes(real),
+    `project wizard uses real behavior: ${real}`,
+  );
+}
+const wizardSrc = readFileSync(
+  join(process.cwd(), "src/components/forms/FormWizard.tsx"),
+  "utf8",
+);
+check(
+  wizardSrc.includes('Step {step + 1} of {steps.length}'),
+  "wizard nav renders step indicator",
+);
+check(
+  wizardSrc.includes('type="submit"'),
+  "wizard footer uses submit button",
+);
+
 check(
   !buildingSchema.safeParse({ name: 'x'.repeat(101), description: '', projectId: 'p1' }).success,
   "building name capped at backend update limit",
@@ -1193,38 +1260,96 @@ check(
   (() => {
     const s = mapSalesDashboardToFrontend({
       apartments: { total: 2, available: 1, reserved: 0, sold: 1, public: 1 },
-      top_enquired_units: [{
+      top_enquired_apartments: [{
         apartment_id: 'a1', unit_number: '201', project_id: 'p1',
-        project_name: 'Cedar', lead_count: 2,
+        project_name: 'Cedar', lead_count: 2, is_public: true,
+        price: '285000.00', bedrooms: 3, bathrooms: 2, area_sqm: '165',
+        floor_number: 2, primary_image: null,
       }],
     });
+    const u = s.topApartments[0];
     return s.apartments.available === 1 && s.apartments.public === 1 &&
-      s.topUnits[0]?.id === 'a1' && s.topUnits[0]?.leadCount === 2;
+      u?.id === 'a1' && u?.leadCount === 2 && u?.isPublic === true &&
+      u?.price === 285000 && u?.bedrooms === 3 && u?.bathrooms === 2 &&
+      u?.areaSqm === 165 && u?.floorNumber === 2 && u?.primaryImage === undefined;
   })(),
-  "sales dashboard maps unit counts and top-enquired units",
+  "sales dashboard maps new key with enriched null-safe fields",
+);
+check(
+  mapSalesDashboardToFrontend({
+    apartments: { total: 0, available: 0, reserved: 0, sold: 0, public: 0 },
+    top_enquired_apartments: undefined as unknown as [],
+  }).topApartments.length === 0,
+  "sales mapper returns [] when top apartments are missing",
 );
 check(
   (() => {
     const f = mapFinanceDashboardToFrontend({
-      total_paid: '25000.00', payment_count: 2, payments_this_month: '5000.00', projects_covered: 1,
-      by_project: [{ project_id: 'p1', project_name: 'Cedar', total_paid: '25000.00' }],
+      total_paid: '25000.00', total_project_budget: '100000.00', remaining_balance: '75000.00',
+      payment_count: 2, payments_this_month: '5000.00', payments_this_month_count: 1,
+      projects_covered: 1,
+      by_project: [{
+        project_id: 'p1', project_name: 'Cedar', budget: '100000.00',
+        total_paid: '25000.00', remaining: '75000.00', current_stage_name: 'Structure',
+      }],
       by_category: [{ category_id: 'c1', category_name: 'Labor', total_paid: '25000.00' }],
+      top_paid_parties: [{ party_id: 'pt1', party_name: 'ABC', total_paid: '25000.00' }],
       recent_payments: [{
         id: 'pay1', project_id: 'p1', project_name: 'Cedar', party_id: 'pt1', party_name: 'ABC',
         category_id: 'c1', category_name: 'Labor', amount: '5000.00', payment_date: '2026-09-01',
         reference: 'R1', description: null,
       }],
     });
-    return f.totalPaid === 25000 && f.paymentsThisMonth === 5000 &&
-      f.byProject[0]?.projectName === 'Cedar' && f.byCategory[0]?.categoryName === 'Labor' &&
+    const p = f.byProject[0];
+    return f.totalPaid === 25000 && f.totalProjectBudget === 100000 &&
+      f.remainingBalance === 75000 && f.paymentsThisMonth === 5000 &&
+      f.paymentsThisMonthCount === 1 &&
+      p?.projectName === 'Cedar' && p?.budget === 100000 && p?.remaining === 75000 &&
+      p?.currentStageName === 'Structure' &&
+      f.byCategory[0]?.categoryName === 'Labor' &&
+      f.topPaidParties[0]?.partyName === 'ABC' && f.topPaidParties[0]?.totalPaid === 25000 &&
       f.recentPayments[0]?.partyName === 'ABC' && f.recentPayments[0]?.reference === 'R1';
   })(),
-  "finance dashboard maps totals/aggregates/recent with resolved names",
+  "finance dashboard maps enriched totals/projects/parties/recent with resolved names",
+);
+check(
+  mapFinanceDashboardToFrontend({
+    total_paid: '0', total_project_budget: '0', remaining_balance: '0',
+    payment_count: 0, payments_this_month: '0', payments_this_month_count: 0,
+    projects_covered: 0, by_project: [], by_category: [],
+    top_paid_parties: undefined as unknown as [],
+    recent_payments: undefined as unknown as [],
+  }).topPaidParties.length === 0,
+  "finance mapper returns [] for missing top parties",
 );
 check(
   dashboardProjectStatusLabel('in_progress') === 'IN_PROGRESS' &&
     dashboardProjectStatusLabel('on_hold') === 'ON_HOLD',
   "dashboard project status keys map through the shared mapper",
+);
+check(
+  financialKpiFontSize('0.00') === undefined &&
+    financialKpiFontSize('52,000.00') === undefined &&
+    financialKpiFontSize('2,050,000.00') === 20 &&
+    financialKpiFontSize('12,500,000.00') === 20 &&
+    financialKpiFontSize('9,999,999,999.00') === 16,
+  "financial KPI tiers keep short totals prominent and shrink long totals",
+);
+check(
+  (() => {
+    // Widest tier-20 value (14 chars incl. decimals) at 20px tabular numerals:
+    // ~0.6em average glyph width -> ~168px, inside the narrowest
+    // six-column desktop card (~180px) and well inside mobile cards.
+    const widest = '12,500,000.00'.length * 20 * 0.6;
+    const widestSmall = '999,999,999,999.00'.length * 16 * 0.6;
+    return widest < 180 && widestSmall < 180;
+  })(),
+  "financial KPI worst-case widths fit inside KPI cards",
+);
+const globalsCss = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+check(
+  globalsCss.includes('.kpi-financial') && globalsCss.includes('white-space:nowrap'),
+  "financial KPI class keeps values on one line without clipping",
 );
 const dashboardSrc = readFileSync(
   join(process.cwd(), "src/components/features/Dashboard.tsx"),
@@ -1244,6 +1369,32 @@ for (const mock of [
   '1 Overdue',
   'Install Reinforcement',
   'operations-report',
+  'Excavation Prep',
+  'Stage: Structure',
+  'Healthy contingency',
+  'Pending Approval',
+  'Maya Haddad',
+  'High Priority',
+  'Worker',
+  'worker',
+  'Equipment',
+  'equipment',
+  'Safety',
+  'safety',
+  'Incident',
+  'incident',
+  'PPE',
+  'Site Workload by Stage',
+  'Enquiries',
+  'Enquiry',
+  'enquiries',
+  'Public Website',
+  'Direct Referral',
+  'Buyer Type',
+  'Buyer',
+  'Investor',
+  'Campaign',
+  'Referral',
 ]) {
   check(
     !dashboardSrc.includes(mock),
@@ -1255,6 +1406,18 @@ for (const real of [
   'getCompanyDashboardTasks',
   'getCompanySalesDashboard',
   'getCompanyLeads',
+  'getProjects',
+  'getStages',
+  'My Site Tasks & Milestones',
+  'Active Construction Stages Progress',
+  'Upcoming Deadlines',
+  'Task Status Breakdown',
+  '/updates/new',
+  'taskDueLabel',
+  'Apartments Receiving Most Leads',
+  'Recent Leads & Pipeline',
+  'View Public Catalog',
+  'topApartments',
   'assignedTo === sessionUser',
 ]) {
   check(
@@ -1277,5 +1440,463 @@ check(
 check(
   !paymentsApiSrc.includes('no summary endpoint exists'),
   "finance overview fan-out comment removed",
+);
+for (const real of [
+  'Project Budget vs Actual Payments',
+  'Top Paid Parties',
+  'Payments by Category',
+  'Recent Payment Disbursements',
+  'Total Project Budget',
+  'Remaining Balance',
+  'Export Fiscal Ledger',
+  'recentPayments',
+  'topPaidParties',
+]) {
+  check(
+    paymentsApiSrc.includes(real),
+    `finance overview renders real data: ${real}`,
+  );
+}
+for (const mock of [
+  'Payments by Project',
+  'Payment Summary',
+  'Categories Used',
+  'of disbursements',
+  'Treasury',
+  'Governance',
+  'governance',
+  'Audit',
+  'audit',
+  'Cleared',
+  'Pending Approval',
+  'threshold',
+]) {
+  check(
+    !paymentsApiSrc.includes(mock),
+    `finance mock removed: ${mock}`,
+  );
+}
+const dashboardApiSrc = readFileSync(
+  join(process.cwd(), "src/lib/api/dashboard.api.ts"),
+  "utf8",
+);check(
+  dashboardApiSrc.includes('top_enquired_apartments'),
+  "dashboard api uses the new top apartments key",
+);
+check(
+  !dashboardApiSrc.includes('top_enquired_units'),
+  "stale top_enquired_units key removed from dashboard api",
+);
+check(
+  dashboardApiSrc.includes('primary_image') && dashboardApiSrc.includes('floor_number'),
+  "dashboard api maps enriched apartment fields",
+);
+check(
+  !dashboardSrc.includes('top_enquired_units') && !dashboardSrc.includes('apartment.api'),
+  "sales dashboard has no stale key and makes no apartment detail requests",
+);
+check(
+  assistantSchema.safeParse({ query: '  show overdue tasks  ' }).success &&
+    !assistantSchema.safeParse({ query: '   ' }).success &&
+    !assistantSchema.safeParse({ query: 'x'.repeat(1001) }).success,
+  "assistant query matches backend 1..1000 trimmed limits",
+);
+check(
+  aiText('hello') === 'hello' && aiText('') === undefined && aiText(null) === undefined &&
+    aiNumber(12.5) === 12.5 && aiNumber('25000.00') === 25000 && aiNumber('bad') === undefined &&
+    aiId('abc') === 'abc' && aiId('') === undefined,
+  "AI result readers normalize centrally without throwing",
+);
+const assistantSrc = readFileSync(
+  join(process.cwd(), "src/components/features/Assistant.tsx"),
+  "utf8",
+);
+for (const mock of [
+  'useWorkspace',
+  'cedar-residence',
+  "q.includes('overdue')",
+  'Local dataset preview',
+  'No external AI service is connected',
+  'projectId',
+]) {
+  check(
+    !assistantSrc.includes(mock),
+    `assistant mock removed: ${mock}`,
+  );
+}
+for (const real of [
+  'searchAI',
+  'AI_INTENT_FORBIDDEN',
+  'AI_QUERY_UNSUPPORTED',
+  'AI_PROVIDER_ERROR',
+  'Analyzing your request',
+  'IntentResults',
+  'ProjectReportResults',
+  'TaskSummaryResults',
+]) {
+  check(
+    assistantSrc.includes(real),
+    `assistant uses real backend: ${real}`,
+  );
+}
+const aiApiSrc = readFileSync(join(process.cwd(), "src/lib/api/ai.api.ts"), "utf8");
+check(
+  aiApiSrc.includes('/ai/search') && aiApiSrc.includes('POST'),
+  "AI api module posts to the company AI search endpoint",
+);
+check(
+  !assistantSrc.includes('sessionStorage') && !assistantSrc.includes('localStorage'),
+  "assistant adds no fake chat persistence",
+);
+check(
+  (assistantSrc.match(/getCompany|getProject[^s]|getStage|getTask[^s]|getApartment|getParties|getPayment[^s]/g) ?? []).length === 0,
+  "assistant makes no fan-out entity requests",
+);
+// ---------------------------------------------------------------------------
+// Public website: real public API integration (no mock runtime data).
+// ---------------------------------------------------------------------------
+const publicApiSrc = readFileSync(join(process.cwd(), "src/lib/api/public.api.ts"), "utf8");
+for (const endpoint of [
+  '/public/companies',
+  '/public/apartments',
+  '/interest',
+]) {
+  check(
+    publicApiSrc.includes(endpoint),
+    `public api module calls real endpoint: ${endpoint}`,
+  );
+}
+check(
+  publicApiSrc.includes('auth: false'),
+  'public api requests are anonymous (auth disabled)',
+);
+check(
+  !publicApiSrc.includes('specialty') && !publicApiSrc.includes('interested_people_count'),
+  'public api types exclude removed backend fields',
+);
+for (const [file, label] of [
+  ["src/components/public/cinematic/CinematicExperience.tsx", "home apartments"],
+  ["src/components/public/apartments/ApartmentsPanel.tsx", "home showcase"],
+  ["src/components/public/apartments/ApartmentsListView.tsx", "/apartments page"],
+  ["src/components/public/apartment-detail/ApartmentDetailView.tsx", "apartment detail"],
+  ["src/components/public/partners/PartnersPanel.tsx", "home partners"],
+  ["src/components/public/company/CompaniesListView.tsx", "/companies page"],
+  ["src/components/public/company/CompanyProfileView.tsx", "company detail"],
+  ["src/components/public/company/CompanyListingCard.tsx", "company card"],
+  ["src/components/public/partners/PartnerCard.tsx", "partner card"],
+  ["src/components/public/apartments/ApartmentListingCard.tsx", "apartment card"],
+  ["src/components/public/search/AISearchView.tsx", "search results"],
+] as const) {
+  const src = readFileSync(join(process.cwd(), file), "utf8");
+  check(
+    !src.includes('@/data/public/partners') && !src.includes('@/data/public/apartments'),
+    `${label} no longer imports mock company/apartment data`,
+  );
+}
+const companyDetailPage = readFileSync(
+  join(process.cwd(), "src/app/(public)/companies/[slug]/page.tsx"),
+  "utf8",
+);
+check(
+  !companyDetailPage.includes('generateStaticParams') && !companyDetailPage.includes('@/data/public/partners'),
+  'company detail route uses dynamic UUID, not mock static params',
+);
+const apartmentDetailPage = readFileSync(
+  join(process.cwd(), "src/app/(public)/apartments/[slug]/page.tsx"),
+  "utf8",
+);
+check(
+  !apartmentDetailPage.includes('generateStaticParams') && !apartmentDetailPage.includes('@/data/public/apartments'),
+  'apartment detail route uses dynamic UUID, not mock static params',
+);
+const interestDialogSrc = readFileSync(
+  join(process.cwd(), "src/components/public/apartment-detail/InterestDialog.tsx"),
+  "utf8",
+);
+check(
+  interestDialogSrc.includes('submitPublicApartmentInterest') &&
+    interestDialogSrc.includes('/interest') === false,
+  'interest dialog uses the centralized public API module',
+);
+check(
+  !interestDialogSrc.includes('saved to this device') &&
+    !interestDialogSrc.includes('not configured yet') &&
+    interestDialogSrc.includes('has been submitted successfully'),
+  'interest dialog shows real success copy, not local-file copy',
+);
+check(
+  !interestDialogSrc.includes('company_id') &&
+    !interestDialogSrc.includes('project_id') &&
+    !interestDialogSrc.includes('building_id') &&
+    !interestDialogSrc.includes('floor_id'),
+  'interest dialog sends no trusted hierarchy ids',
+);
+const aiSearchSrc = readFileSync(join(process.cwd(), "src/lib/public/ai-search.ts"), "utf8");
+check(
+  aiSearchSrc.includes('getAllPublicApartments') && aiSearchSrc.includes('getPublicCompanies'),
+  'public search loads complete API arrays instead of mock data',
+);
+check(
+  !aiSearchSrc.includes('@/data/public/apartments') && !aiSearchSrc.includes('@/data/public/partners'),
+  'public search no longer imports mock arrays',
+);
+check(
+  !aiSearchSrc.includes('specialty') && !aiSearchSrc.includes('a.features'),
+  'public search matcher drops mock-only dimensions',
+);
+for (const mockFile of [
+  "src/data/public/partners.ts",
+  "src/data/public/apartments.ts",
+  "src/lib/public/interest.ts",
+]) {
+  let exists = true;
+  try {
+    readFileSync(join(process.cwd(), mockFile), "utf8");
+  } catch {
+    exists = false;
+  }
+  check(!exists, `mock runtime source removed: ${mockFile}`);
+}
+const companyCardSrc = readFileSync(
+  join(process.cwd(), "src/components/public/company/CompanyListingCard.tsx"),
+  "utf8",
+);
+check(
+  companyCardSrc.includes('apartment_count') && !companyCardSrc.includes('specialty'),
+  'company card uses real apartment_count, not mock specialty',
+);
+const apartmentCardSrc = readFileSync(
+  join(process.cwd(), "src/components/public/apartments/ApartmentListingCard.tsx"),
+  "utf8",
+);
+check(
+  apartmentCardSrc.includes('unit_number') && apartmentCardSrc.includes('/apartments/${apartment.id}'),
+  'apartment card uses unit_number title and UUID route',
+);
+const companyProfileSrc = readFileSync(
+  join(process.cwd(), "src/components/public/company/CompanyProfileView.tsx"),
+  "utf8",
+);
+check(
+  companyProfileSrc.includes('getPublicApartments({ company_id: companyId, page: residencesPage') &&
+    companyProfileSrc.includes('page_size: RESIDENCES_PAGE_SIZE'),
+  'company residences request paginated company_id/page/page_size',
+);
+check(
+  companyProfileSrc.includes('RESIDENCES_PAGE_SIZE = 6'),
+  'company residences page size is 6',
+);
+check(
+  companyProfileSrc.includes('response.items') || companyProfileSrc.includes('residencesData?.items'),
+  'company residences render backend response items directly',
+);
+check(
+  !companyProfileSrc.includes('getAllPublicApartments'),
+  'company residences grid no longer assembles the full catalog',
+);
+check(
+  companyProfileSrc.includes('‹ Prev') && companyProfileSrc.includes('Next ›'),
+  'company residences have Previous/Next controls',
+);
+check(
+  !companyProfileSrc.includes('Array.from({ length:') && companyProfileSrc.includes('Page {residencesPage} of {residenceTotalPages}'),
+  'company residences show a static page indicator with no numbered buttons',
+);
+check(
+  companyProfileSrc.includes('disabled={residencesPage === 1') &&
+    companyProfileSrc.includes('disabled={residencesPage === residenceTotalPages'),
+  'company residences disable Previous on first page and Next on last page',
+);
+check(
+  companyProfileSrc.includes('No public residences yet.'),
+  'company residences keep the zero-apartments empty state',
+);
+check(
+  companyProfileSrc.includes('setResidencesPage(Math.max(1, data.total_pages))'),
+  'company residences fall back to the last valid page when out of range',
+);
+check(
+  companyProfileSrc.includes('/apartments/${apartment.id}'),
+  'company residence cards keep UUID apartment links',
+);
+// ---------------------------------------------------------------------------
+// Public apartments: backend pagination (page/page_size, no status param).
+// ---------------------------------------------------------------------------
+check(
+  publicApiSrc.includes('PublicApartmentsPage') &&
+    publicApiSrc.includes('total_pages') &&
+    publicApiSrc.includes('page_size'),
+  'public api types match the paginated backend response',
+);
+check(
+  (() => {
+    const start = publicApiSrc.indexOf('getPublicApartments');
+    const body = publicApiSrc.slice(start, start + 800);
+    return body.includes('page') && body.includes('page_size') && body.includes('company_id');
+  })(),
+  'apartments API sends page/page_size/company_id using the real contract',
+);
+check(
+  publicApiSrc.includes('getAllPublicApartments') &&
+    publicApiSrc.includes('total_pages'),
+  'full-set helper walks backend pages instead of assuming one response',
+);
+const apartmentsListSrc = readFileSync(
+  join(process.cwd(), "src/components/public/apartments/ApartmentsListView.tsx"),
+  "utf8",
+);
+check(
+  apartmentsListSrc.includes('page: currentPage') && apartmentsListSrc.includes('page_size: PAGE_SIZE'),
+  'apartments page requests backend pages with page/page_size',
+);
+check(
+  apartmentsListSrc.includes('pageData?.items') &&
+    !apartmentsListSrc.includes('Array.from({ length: totalPages }') &&
+    !apartmentsListSrc.includes('al-page is-active'),
+  'unfiltered list renders backend page items with no numbered buttons',
+);
+check(
+  !apartmentsListSrc.includes('Math.ceil(visible.length'),
+  'page totals no longer derive from a locally loaded full array',
+);
+check(
+  apartmentsListSrc.includes('al-page-indicator') &&
+    !apartmentsListSrc.includes('al-page is-active') &&
+    apartmentsListSrc.includes('Page {safePage} of {totalPages}'),
+  'pagination shows Previous/Next with a static page indicator only',
+);
+check(
+  apartmentsListSrc.includes('setCurrentPage(1)') || apartmentsListSrc.includes('setCurrentPage(Math.max(1'),
+  'status change resets pagination to the first page',
+);
+check(
+  apartmentsListSrc.includes('total_pages') && apartmentsListSrc.includes('pageData'),
+  'pagination metadata comes from the backend response',
+);
+check(
+  !apartmentsListSrc.includes('?status=') && !apartmentsListSrc.includes('status: filter'),
+  'status filter stays client-side because the backend exposes no status param',
+);
+const cinematicSrc = readFileSync(
+  join(process.cwd(), "src/components/public/cinematic/CinematicExperience.tsx"),
+  "utf8",
+);
+check(
+  cinematicSrc.includes('page_size: HOME_SHOWCASE_PAGE_SIZE') || cinematicSrc.includes('page: 1'),
+  'home showcase requests one small backend page, not the catalog',
+);
+const apartmentDetailSrc2 = readFileSync(
+  join(process.cwd(), "src/components/public/apartment-detail/ApartmentDetailView.tsx"),
+  "utf8",
+);
+check(
+  apartmentDetailSrc2.includes('page_size: 4') && apartmentDetailSrc2.includes('company_id'),
+  'related apartments request one small company page',
+);
+check(
+  !companyProfileSrc.includes('company.owner') &&
+    !companyProfileSrc.includes('company.stats') &&
+    !companyProfileSrc.includes('company.capabilities') &&
+    !companyProfileSrc.includes('company.specialty'),
+  'company profile renders no fictional owner/stats/capabilities/specialty',
+);
+const apartmentDetailSrc = readFileSync(
+  join(process.cwd(), "src/components/public/apartment-detail/ApartmentDetailView.tsx"),
+  "utf8",
+);
+check(
+  apartmentDetailSrc.includes('getPublicApartment') &&
+    apartmentDetailSrc.includes('toApartmentDetailViewModel'),
+  'apartment detail loads real API through the view-model adapter',
+);
+const apartmentDetailModelSrc = readFileSync(
+  join(process.cwd(), "src/lib/public/apartment-detail-model.ts"),
+  "utf8",
+);
+check(
+  apartmentDetailModelSrc.includes('image_url') &&
+    !apartmentDetailModelSrc.includes('getPublicApartment') &&
+    !apartmentDetailModelSrc.includes('apiJson'),
+  'apartment view model maps gallery image_urls with no direct API calls',
+);
+const publicSearchApiSrc = readFileSync(join(process.cwd(), "src/lib/api/public.api.ts"), "utf8");
+check(
+  publicSearchApiSrc.includes('/public/ai/search') && publicSearchApiSrc.includes('searchPublicAI'),
+  'public search calls POST /public/ai/search via central module',
+);
+check(
+  (() => {
+    const start = publicSearchApiSrc.indexOf('searchPublicAI');
+    const body = publicSearchApiSrc.slice(start, start + 600);
+    return body.includes('auth: false') && body.includes('{ query');
+  })(),
+  'public AI request sends only query with auth:false',
+);
+check(
+  !publicSearchApiSrc.includes('/companies/${companyId}/ai/search') &&
+    !publicSearchApiSrc.includes('company_id}/ai/search'),
+  'public API module never touches the authenticated AI endpoint',
+);
+const publicSearchViewSrc = readFileSync(
+  join(process.cwd(), "src/components/public/search/AISearchView.tsx"),
+  "utf8",
+);
+check(
+  !publicSearchViewSrc.includes('/companies/') || !publicSearchViewSrc.includes('/ai/search'),
+  'public search view uses no authenticated AI endpoint',
+);
+check(
+  publicSearchViewSrc.includes('maxLength={1000}'),
+  'public search input caps query at backend 1000-char limit',
+);
+check(
+  publicSearchViewSrc.includes('ai-answer') && publicSearchViewSrc.includes('response.answer'),
+  'public search renders the backend AI answer',
+);
+check(
+  publicSearchViewSrc.includes('aiUnavailable') &&
+    publicSearchViewSrc.includes('AI search is temporarily unavailable'),
+  'public search labels the real-data local fallback truthfully',
+);
+const hybridSearchSrc = readFileSync(join(process.cwd(), "src/lib/public/ai-search.ts"), "utf8");
+check(
+  !hybridSearchSrc.includes('NEXT_PUBLIC_AI_SEARCH_URL') && !hybridSearchSrc.includes('queryAiBackend'),
+  'obsolete AI endpoint env override removed from public search',
+);
+check(
+  hybridSearchSrc.includes('searchPublicAI') && hybridSearchSrc.includes('localSearch'),
+  'public search runs hybrid AI plus local matcher',
+);
+check(
+  hybridSearchSrc.includes('dedupeById') || hybridSearchSrc.includes('seen'),
+  'hybrid search dedupes apartments by UUID',
+);
+check(
+  hybridSearchSrc.includes("status.toLowerCase() !== 'available'") ||
+    hybridSearchSrc.includes('!== \'available\''),
+  'hybrid search preserves reserved/sold coverage locally',
+);
+check(
+  hybridSearchSrc.includes('UNKNOWN') && hybridSearchSrc.includes('local.companies'),
+  'hybrid search keeps local company results for UNKNOWN intent',
+);
+check(
+  !hybridSearchSrc.includes('@/data/public/partners') && !hybridSearchSrc.includes('@/data/public/apartments'),
+  'hybrid search uses API-loaded arrays, not mock data',
+);
+const nextConfigSrc = readFileSync(join(process.cwd(), "next.config.ts"), "utf8");
+check(
+  nextConfigSrc.includes('ik.imagekit.io'),
+  'next/image allows the public API ImageKit host',
+);
+const servicesSrc = readFileSync(join(process.cwd(), "src/data/public/services.ts"), "utf8");
+check(
+  servicesSrc.includes('Engineering'),
+  'static marketing services remain static',
+);
+const statsSrc = readFileSync(join(process.cwd(), "src/data/public/stats.ts"), "utf8");
+check(
+  statsSrc.includes('buildoraStats'),
+  'static marketing stats remain static',
 );
 console.log(`${count} validation checks passed.`);

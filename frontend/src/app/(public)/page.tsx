@@ -1,2 +1,4 @@
-import { PublicHome } from '@/components/features/PublicPages';
-export default function Page(){return <PublicHome />;}
+import CinematicExperience from "@/components/public/cinematic/CinematicExperience";
+export default function Home() {
+  return <CinematicExperience />;
+}

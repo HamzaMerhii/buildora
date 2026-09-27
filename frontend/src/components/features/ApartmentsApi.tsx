@@ -54,20 +54,30 @@ function AvailabilityDonut({
   sold: number;
   total: number;
 }) {
-  const radius = 54;
+  const size = 200;
+  const radius = 80;
+  const center = size / 2;
   const circumference = 2 * Math.PI * radius;
   const segments = [
-    { label: 'Available', value: available, color: '#22c55e' },
-    { label: 'Reserved', value: reserved, color: '#f59e0b' },
-    { label: 'Sold', value: sold, color: '#64748b' },
+    { label: 'Available', detail: 'Ready for sale', value: available, color: 'var(--mist)' },
+    { label: 'Reserved', detail: 'Awaiting completion', value: reserved, color: '#7FA3D6' },
+    { label: 'Sold', detail: 'Handed over', value: sold, color: 'var(--primary)' },
   ];
   let offset = 0;
   const pct = (v: number) => (total > 0 ? Math.round((v / total) * 100) : 0);
+  const pctExact = (v: number) =>
+    total > 0 ? (v / total) * 100 : 0;
   return (
-    <div className="donut-wrap">
-      <div className="donut-chart">
-        <svg width="140" height="140" viewBox="0 0 140 140" role="img" aria-label={`Availability: ${available} available, ${reserved} reserved, ${sold} sold, ${total} total`}>
-          <circle cx="70" cy="70" r={radius} fill="none" strokeWidth="18" stroke="var(--line)" />
+    <div className="avail-wrap">
+      <div className="avail-chart">
+        <svg
+          width={size}
+          height={size}
+          viewBox={`0 0 ${size} ${size}`}
+          role="img"
+          aria-label={`Availability: ${available} available, ${reserved} reserved, ${sold} sold, ${total} total`}
+        >
+          <circle cx={center} cy={center} r={radius} fill="none" strokeWidth="26" stroke="var(--line)" />
           {total > 0 &&
             segments.map((s) => {
               if (!s.value) return null;
@@ -77,36 +87,54 @@ function AvailabilityDonut({
               return (
                 <circle
                   key={s.label}
-                  cx="70"
-                  cy="70"
+                  className="avail-seg"
+                  cx={center}
+                  cy={center}
                   r={radius}
                   fill="none"
-                  strokeWidth="18"
+                  strokeWidth="26"
                   stroke={s.color}
                   strokeDasharray={`${length} ${circumference - length}`}
                   strokeDashoffset={dashOffset}
-                  transform="rotate(-90 70 70)"
+                  transform={`rotate(-90 ${center} ${center})`}
                   strokeLinecap="butt"
-                />
+                >
+                  <title>
+                    {s.label} — {s.value} apartment{s.value === 1 ? '' : 's'} (
+                    {pctExact(s.value).toFixed(1)}% of inventory)
+                  </title>
+                </circle>
               );
             })}
         </svg>
         <div className="donut-center" aria-hidden="true">
           <strong>{total}</strong>
-          <small>UNITS</small>
+          <small>TOTAL UNITS</small>
         </div>
       </div>
-      <ul className="donut-legend">
-        {segments.map((s) => (
-          <li key={s.label}>
-            <span className="donut-dot" style={{ background: s.color }} aria-hidden="true" />
-            <span>{s.label}</span>
-            <strong>
-              {s.value} ({pct(s.value)}%)
-            </strong>
-          </li>
-        ))}
-      </ul>
+      <div className="avail-breakdown">
+        <ul className="avail-rows">
+          {segments.map((s) => (
+            <li key={s.label}>
+              <span className="donut-dot" style={{ background: s.color }} aria-hidden="true" />
+              <span className="avail-row-main">
+                <span>{s.label}</span>
+                <span className="small muted">{s.detail}</span>
+              </span>
+              <strong className="avail-nums">{s.value}</strong>
+              <span className="avail-pct">{pct(s.value)}%</span>
+              <span className="avail-bar" aria-hidden="true">
+                <span style={{ width: `${pct(s.value)}%`, background: s.color }} />
+              </span>
+            </li>
+          ))}
+        </ul>
+        {total > 0 && (
+          <p className="small muted">
+            {pct(available)}% of inventory is currently available.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

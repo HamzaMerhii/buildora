@@ -149,7 +149,7 @@ export function PartiesWorkspaceList() {
  * (no Party→Project relation exists); project involvement is derived
  * from payment records. Delete is hidden (no DELETE endpoint).
  */
-const DONUT_COLORS = ['#22c55e', '#f59e0b', '#64748b', '#3b82f6', '#a855f7', '#64748b'];
+const DONUT_COLORS = ['#19335A', '#4675C0', '#8FC8EB', '#697A98', '#B8BFD6', '#7fa3d6'];
 
 export function PartyWorkspaceDetail({ id }: { id: string }) {
   const companyId = useAuthStore((s) => s.companyId);
