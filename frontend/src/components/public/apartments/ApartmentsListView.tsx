@@ -1,6 +1,7 @@
 'use client';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { motion, useReducedMotionConfig } from 'framer-motion';
@@ -14,7 +15,6 @@ import { friendlyMessage } from '@/lib/api/client';
 import { RouteNavbar } from '@/components/public/layout/Navbar';
 import NeonPanel from '@/components/public/ui/NeonPanel';
 import GlowButton from '@/components/public/ui/GlowButton';
-import ProjectDialog from '@/components/public/ui/ProjectDialog';
 import ApartmentListingCard from './ApartmentListingCard';
 
 /** Visible cards per page. Sent as backend `page_size` in unfiltered mode. */
@@ -48,8 +48,8 @@ function searchableText(apartment: PublicApartmentListItem): string {
 }
 
 export default function ApartmentsListView() {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
-  const [contact, setContact] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   // Backend-driven page for the unfiltered view (no client slicing).
   const [pageData, setPageData] = useState<PublicApartmentsPage | null>(null);
@@ -249,13 +249,11 @@ export default function ApartmentsListView() {
           <h2>Build with the right partner.</h2>
           <p>Explore Buildora apartments or register your construction company to manage projects, teams, and leads in one workspace.</p>
           <div className="co-cta-actions">
-            <GlowButton onClick={() => setContact(true)}>Register Your Construction Company</GlowButton>
+            <GlowButton onClick={() => router.push('/register')}>Register Your Construction Company</GlowButton>
             <Link className="ghost-button co-back" href="/">Back to Buildora</Link>
           </div>
         </section>
       </Reveal>
     </main>
-
-    <ProjectDialog open={contact} onClose={() => setContact(false)} />
   </div>;
 }

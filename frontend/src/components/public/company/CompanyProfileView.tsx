@@ -3,7 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { motion, useReducedMotionConfig } from 'framer-motion';
-import { notFound } from 'next/navigation';
+import { notFound, useRouter } from 'next/navigation';
 import {
   apartmentDisplayName,
   formatApartmentArea,
@@ -17,7 +17,6 @@ import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { GENERAL_COMPANY_DESCRIPTION } from '@/lib/public/company-copy';
 import NeonPanel from '@/components/public/ui/NeonPanel';
 import GlowButton from '@/components/public/ui/GlowButton';
-import ProjectDialog from '@/components/public/ui/ProjectDialog';
 import { RouteNavbar } from '@/components/public/layout/Navbar';
 
 function Reveal({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
@@ -30,7 +29,7 @@ function Reveal({ children, className, delay = 0 }: { children: React.ReactNode;
 const RESIDENCES_PAGE_SIZE = 6;
 
 export default function CompanyProfileView({ companyId }: { companyId: string }) {
-  const [contact, setContact] = useState(false);
+  const router = useRouter();
   const [company, setCompany] = useState<PublicCompanyDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
@@ -260,12 +259,10 @@ export default function CompanyProfileView({ companyId }: { companyId: string })
         <h2>Build with {company.name}</h2>
         <p>Register your construction company to manage projects, teams, and leads with Buildora.</p>
         <div className="co-cta-actions">
-          <GlowButton onClick={() => setContact(true)}>Register Your Construction Company</GlowButton>
+          <GlowButton onClick={() => router.push('/register')}>Register Your Construction Company</GlowButton>
           <Link className="ghost-button co-back" href="/">Back to Buildora</Link>
         </div>
       </Reveal>
     </section>
-
-    <ProjectDialog open={contact} onClose={() => setContact(false)} />
   </div>;
 }

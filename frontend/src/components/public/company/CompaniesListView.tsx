@@ -1,13 +1,13 @@
 'use client';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { motion, useReducedMotionConfig } from 'framer-motion';
 import { getPublicCompanies, type PublicCompanySummary } from '@/lib/api/public.api';
 import { friendlyMessage } from '@/lib/api/client';
 import { RouteNavbar } from '@/components/public/layout/Navbar';
 import GlowButton from '@/components/public/ui/GlowButton';
-import ProjectDialog from '@/components/public/ui/ProjectDialog';
 import CompanyListingCard from './CompanyListingCard';
 
 function Reveal({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
@@ -17,7 +17,7 @@ function Reveal({ children, className, delay = 0 }: { children: React.ReactNode;
 }
 
 export default function CompaniesListView() {
-  const [contact, setContact] = useState(false);
+  const router = useRouter();
   const [companies, setCompanies] = useState<PublicCompanySummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,13 +100,11 @@ export default function CompaniesListView() {
           <h2>Build with the right partner.</h2>
           <p>Explore Buildora&rsquo;s construction network or register your company to manage projects, teams, and leads in one workspace.</p>
           <div className="co-cta-actions">
-            <GlowButton onClick={() => setContact(true)}>Register Your Construction Company</GlowButton>
+            <GlowButton onClick={() => router.push('/register')}>Register Your Construction Company</GlowButton>
             <Link className="ghost-button co-back" href="/apartments">Explore Apartments</Link>
           </div>
         </section>
       </Reveal>
     </main>
-
-    <ProjectDialog open={contact} onClose={() => setContact(false)} />
   </div>;
 }

@@ -127,16 +127,28 @@ function apartmentPath(
   return apartmentId ? `${base}${apartmentId}` : base;
 }
 
+/** Floor endpoint page envelope: GET .../floors/{floor_id}/apartments/ */
+export interface BackendFloorApartmentsPage {
+  items: BackendApartment[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
 export async function getApartments(
   companyId: string,
   projectId: string,
   buildingId: string,
   floorId: string,
 ): Promise<ApiApartment[]> {
-  const raw = await apiJson<BackendApartment[]>(
+  // The floor endpoint is paginated (page_size max 100). Callers expect
+  // the complete floor list, so request one full page and unwrap items.
+  const raw = await apiJson<BackendFloorApartmentsPage>(
     apartmentPath(companyId, projectId, buildingId, floorId),
+    { query: { page: 1, page_size: 100 } },
   );
-  return raw.map(mapApartmentResponseToFrontend);
+  return raw.items.map(mapApartmentResponseToFrontend);
 }
 
 export async function getApartment(

@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { motion, useMotionValue, useMotionValueEvent, useReducedMotionConfig, useScroll, useSpring, useTransform } from 'framer-motion';
 import SceneBackground from './SceneBackground';
@@ -16,13 +17,12 @@ import { apartmentDisplayName, getPublicApartments, type PublicApartmentListItem
 /** Home showcase shows the first three public apartments. No backend ranking. */
 const HOME_SHOWCASE_PAGE_SIZE = 3;
 import ServicesPanel from '@/components/public/services/ServicesPanel';
-import ProjectDialog from '@/components/public/ui/ProjectDialog';
 
 export default function CinematicExperience() {
+  const router = useRouter();
   const track = useRef<HTMLElement>(null);
   const reduced = Boolean(useReducedMotionConfig());
   const [active, setActive] = useState(0);
-  const [contact, setContact] = useState(false);
   const [apartments, setApartments] = useState<PublicApartmentListItem[]>([]);
   const [apartmentsLoading, setApartmentsLoading] = useState(true);
   const [apartmentsFailed, setApartmentsFailed] = useState(false);
@@ -67,11 +67,9 @@ export default function CinematicExperience() {
   }
   // Refs keep the single global key handler fresh without re-subscribing.
   const activeRef = useRef(active);
-  const contactRef = useRef(contact);
   const navigateRef = useRef(navigate);
   useEffect(() => {
     activeRef.current = active;
-    contactRef.current = contact;
     navigateRef.current = navigate;
   });
 
@@ -80,7 +78,6 @@ export default function CinematicExperience() {
       if (e.key !== 'Enter' || e.repeat) return;
       if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
       // Never steal Enter from the project brief dialog or its form.
-      if (contactRef.current) return;
       if (document.querySelector('.project-dialog[open]')) return;
       // Never steal Enter from interactive or editable elements.
       const el = document.activeElement as HTMLElement | null;
@@ -102,7 +99,7 @@ export default function CinematicExperience() {
       <Navbar navigate={navigate} />
       <SceneTransition className="hero-scene" label="Building the future" progress={progress} times={TIMELINE.heroTravel} positions={['0%', '0%', '-46%']} fadeTimes={[0, 0.14, 0.185]} fades={[1, 1, 0]} active={active === 0} reduced={reduced}>
         <SceneBackground src="/images/hero-city.webp" alt="Aerial nighttime city with a centered skyscraper and illuminated crown" priority position="50% 30%" progress={progress} range={[0, 0.1, 0.185]} scales={[1.02, 1.05, 1.12]} pan={['0%', '-0.8%', '-3%']} reduced={reduced} />
-        <motion.div className="foreground-layer" style={{ x: reduced ? 0 : heroUIX, y: reduced ? 0 : heroUIY }}><HeroSection onStart={() => setContact(true)} copyOpacity={heroCopyOpacity} ctaOpacity={heroCTAOpacity} /></motion.div>
+        <motion.div className="foreground-layer" style={{ x: reduced ? 0 : heroUIX, y: reduced ? 0 : heroUIY }}><HeroSection onStart={() => router.push('/register')} copyOpacity={heroCopyOpacity} ctaOpacity={heroCTAOpacity} /></motion.div>
       </SceneTransition>
       <SceneTransition className="services-scene" label="Our Services" progress={progress} times={TIMELINE.servicesTravel} positions={['46%', '0%', '0%', '-44%']} fadeTimes={[0.11, 0.17, 0.345, 0.4]} fades={[0, 1, 1, 0]} active={active === 1} reduced={reduced}>
         <SceneBackground src="/images/services-city.webp" alt="Cyan-lit skyscrapers rising above a nighttime city" progress={progress} range={[0.115, 0.185, 0.335, 0.415]} scales={[1.12, 1.05, 1.03, 1.11]} pan={['3%', '1%', '-0.8%', '-3%']} reduced={reduced} />
@@ -122,11 +119,10 @@ export default function CinematicExperience() {
       </SceneTransition>
       <SceneTransition className="final-scene" label="Build with us" progress={progress} times={TIMELINE.finalTravel} positions={['46%', '0%', '0%']} fadeTimes={[0.835, 0.905, 1]} fades={[0, 1, 1]} active={active === 5} reduced={reduced}>
         <SceneBackground src="/images/construction-site.webp" alt="Construction framework glowing at night" position="80% center" progress={progress} range={[0.84, 0.92, 1]} scales={[1.08, 1.04, 1.02]} pan={['-2%', '-0.5%', '0%']} reduced={reduced} />
-        <FinalCTASection onStart={() => setContact(true)} progress={progress} reduced={reduced} />
+        <FinalCTASection onStart={() => router.push('/register')} progress={progress} reduced={reduced} />
       </SceneTransition>
       <nav className="scene-navigation" aria-label="Scene navigation">{['City', 'Services', 'Why Buildora', 'Partners', 'Apartments', 'Final'].map((label, i) => <button key={label} onClick={() => navigate(i)} aria-label={`Go to ${label}`} aria-current={active === i ? 'step' : undefined}><span /></button>)}</nav>
     </div>
-    <ProjectDialog open={contact} onClose={() => setContact(false)} />
   </main>;
 }
 

@@ -1,14 +1,13 @@
 'use client';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { motion, useReducedMotionConfig } from 'framer-motion';
 import { Search, Sparkles } from 'lucide-react';
 import { searchBuildora, type SearchResponse } from '@/lib/public/ai-search';
 import { RouteNavbar } from '@/components/public/layout/Navbar';
 import GlowButton from '@/components/public/ui/GlowButton';
-import ProjectDialog from '@/components/public/ui/ProjectDialog';
 import ApartmentListingCard from '@/components/public/apartments/ApartmentListingCard';
 import CompanyListingCard from '@/components/public/company/CompanyListingCard';
 
@@ -48,12 +47,12 @@ function InterpretationChips({ response }: { response: SearchResponse }) {
 }
 
 function AISearchPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [contact, setContact] = useState(false);
   const initialQ = useRef<string | null>(null);
 
   const run = useCallback(async (q: string) => {
@@ -210,14 +209,12 @@ function AISearchPage() {
           <h2>Didn&rsquo;t find what you need?</h2>
           <p>Start a project with Buildora or explore our construction partners.</p>
           <div className="co-cta-actions">
-            <GlowButton onClick={() => setContact(true)}>Register Your Construction Company</GlowButton>
+            <GlowButton onClick={() => router.push('/register')}>Register Your Construction Company</GlowButton>
             <Link className="ghost-button co-back" href="/companies">View Companies</Link>
           </div>
         </section>
       </Reveal>
     </main>
-
-    <ProjectDialog open={contact} onClose={() => setContact(false)} />
   </div>;
 }
 
