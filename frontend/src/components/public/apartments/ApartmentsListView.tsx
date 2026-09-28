@@ -1,7 +1,8 @@
 'use client';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Search, X } from 'lucide-react';
 import { motion, useReducedMotionConfig } from 'framer-motion';
 import {
   getAllPublicApartments,
@@ -16,9 +17,6 @@ import GlowButton from '@/components/public/ui/GlowButton';
 import ProjectDialog from '@/components/public/ui/ProjectDialog';
 import ApartmentListingCard from './ApartmentListingCard';
 
-const FILTERS = ['All', 'Available', 'Reserved', 'Sold'] as const;
-type Filter = (typeof FILTERS)[number];
-
 /** Visible cards per page. Sent as backend `page_size` in unfiltered mode. */
 const PAGE_SIZE = 6;
 
@@ -28,30 +26,50 @@ function Reveal({ children, className, delay = 0 }: { children: React.ReactNode;
   return <motion.div className={className} initial={{ opacity: 0, y: 22 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.6, delay }}>{children}</motion.div>;
 }
 
-function matchesFilter(apartment: PublicApartmentListItem, filter: Filter): boolean {
-  if (filter === 'All') return true;
-  return apartment.status.trim().toLowerCase() === filter.toLowerCase();
+/**
+ * Searchable text built only from real public list fields. Bedroom count
+ * is rendered as a "N bedroom" token so queries like "2 bedroom" match.
+ */
+function searchableText(apartment: PublicApartmentListItem): string {
+  const parts: Array<string | number | null | undefined> = [
+    apartment.unit_number,
+    apartment.project_name,
+    apartment.company_name,
+    apartment.project_location,
+    apartment.status,
+    apartment.floor_number,
+  ];
+  if (apartment.bedrooms !== null && apartment.bedrooms !== undefined) {
+    parts.push(`${apartment.bedrooms} bedroom`);
+  }
+  return parts
+    .filter((part) => part !== null && part !== undefined && part !== '')
+    .join(' ');
 }
 
 export default function ApartmentsListView() {
-  const [filter, setFilter] = useState<Filter>('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [contact, setContact] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   // Backend-driven page for the unfiltered view (no client slicing).
   const [pageData, setPageData] = useState<PublicApartmentsPage | null>(null);
-  // Complete backend-assembled set for status views. The backend exposes
-  // no `status` query param, so filtering one backend page locally would
-  // silently drop matches living on other pages — hence the full fetch.
-  const [filteredAll, setFilteredAll] = useState<PublicApartmentListItem[] | null>(null);
+  // Complete backend-assembled set for client-side search. The backend
+  // exposes no `search` query param, so matching one backend page locally
+  // would silently drop matches living on other pages — hence the full
+  // fetch, performed once and reused for every keystroke.
+  const [allItems, setAllItems] = useState<PublicApartmentListItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const reducedMotion = useReducedMotionConfig();
   const requestRef = useRef(0);
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const isSearching = normalizedQuery.length > 0;
+
   useEffect(() => {
     const request = ++requestRef.current;
-    if (filter === 'All') {
+    if (!isSearching) {
       getPublicApartments({ page: currentPage, page_size: PAGE_SIZE })
         .then((data) => {
           if (request !== requestRef.current) return;
@@ -68,11 +86,11 @@ export default function ApartmentsListView() {
           setError(friendlyMessage(err));
           setLoading(false);
         });
-    } else {
+    } else if (allItems === null) {
       getAllPublicApartments()
         .then((items) => {
           if (request !== requestRef.current) return;
-          setFilteredAll(items.filter((a) => matchesFilter(a, filter)));
+          setAllItems(items);
           setLoading(false);
         })
         .catch((err) => {
@@ -82,21 +100,33 @@ export default function ApartmentsListView() {
         });
     }
     return () => { requestRef.current += 1; };
-  }, [filter, currentPage, retryNonce]);
+  }, [isSearching, currentPage, retryNonce, allItems]);
+
+  // Entirely local: no network request is sent while typing once the
+  // dataset is cached. Entering search mode resets to the first page.
+  const filtered = useMemo(() => {
+    if (!isSearching) return [];
+    return (allItems ?? []).filter((apartment) =>
+      searchableText(apartment).toLowerCase().includes(normalizedQuery),
+    );
+  }, [allItems, normalizedQuery, isSearching]);
 
   function retry() {
     setError(null);
+    if (isSearching) setAllItems(null);
     setLoading(true);
     setRetryNonce((n) => n + 1);
   }
 
-  function selectFilter(option: Filter) {
-    if (loading && option === filter) return;
-    setFilter(option);
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
     setCurrentPage(1);
-    setPageData(null);
-    setFilteredAll(null);
-    setError(null);
+    if (value.trim().length > 0) setLoading(allItems === null);
+  }
+
+  function clearSearch() {
+    setSearchQuery('');
+    setCurrentPage(1);
     setLoading(true);
   }
 
@@ -105,37 +135,37 @@ export default function ApartmentsListView() {
   }
 
   // Backend-driven values for the unfiltered view; local values over the
-  // complete backend-assembled set for status views.
-  const isUnfiltered = filter === 'All';
-  const total = isUnfiltered ? (pageData?.total ?? 0) : (filteredAll?.length ?? 0);
-  const totalPages = isUnfiltered
+  // complete backend-assembled set while searching.
+  const total = !isSearching ? (pageData?.total ?? 0) : filtered.length;
+  const totalPages = !isSearching
     ? Math.max(1, pageData?.total_pages ?? 1)
-    : Math.max(1, Math.ceil((filteredAll?.length ?? 0) / PAGE_SIZE));
-  const safePage = isUnfiltered ? currentPage : Math.min(currentPage, totalPages);
-  const pageItems = isUnfiltered
+    : Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = !isSearching ? currentPage : Math.min(currentPage, totalPages);
+  const pageItems = !isSearching
     ? (pageData?.items ?? [])
-    : (filteredAll ?? []).slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const hasData = isUnfiltered ? pageData !== null : filteredAll !== null;
+    : filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const hasData = !isSearching ? pageData !== null : allItems !== null;
 
   const countLabel = !hasData && !error
     ? 'Loading residences…'
-    : filter === 'All'
-      ? `${total} Residence${total === 1 ? '' : 's'}`
-      : `${total} ${filter} Residence${total === 1 ? '' : 's'}`;
+    : isSearching
+      ? `${total} Residence${total === 1 ? '' : 's'} found`
+      : `${total} Residence${total === 1 ? '' : 's'}`;
   const rangeFrom = total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
   const rangeLabel = total === 0 ? '' : `Showing ${rangeFrom}–${Math.min(safePage * PAGE_SIZE, total)} of ${total}`;
-  const emptyHeading = total === 0 && filter === 'All'
-    ? 'No residences published yet.'
-    : 'No apartments match this selection.';
-  const emptyCopy = total === 0 && filter === 'All'
-    ? 'Check back soon to explore new residences.'
-    : 'Try a different availability filter to keep exploring.';
+  const isSearchMiss = isSearching && hasData && filtered.length === 0;
+  const emptyHeading = isSearchMiss
+    ? 'No apartments match your search.'
+    : 'No residences published yet.';
+  const emptyCopy = isSearchMiss
+    ? 'Try another unit number, project, company, or location.'
+    : 'Check back soon to explore new residences.';
 
   function goToPage(page: number) {
     const next = Math.min(Math.max(1, page), totalPages);
     if (next === currentPage || loading) return;
     setCurrentPage(next);
-    setLoading(true);
+    if (!isSearching) setLoading(true);
     scrollToToolbar();
   }
 
@@ -156,25 +186,26 @@ export default function ApartmentsListView() {
 
     <main className="al-main">
       <Reveal>
-        <div className="al-toolbar" id="al-catalog-toolbar" role="group" aria-label="Filter apartments by availability">
+        <div className="al-toolbar" id="al-catalog-toolbar">
           <div>
             <p className="al-count" role="status">{error ?? countLabel}</p>
             {rangeLabel && <p className="al-range">{rangeLabel}</p>}
           </div>
-          <div className="al-filters">
-            {FILTERS.map(option => (
-              <button
-                key={option}
-                type="button"
-                className={filter === option ? 'al-filter is-active' : 'al-filter'}
-                aria-pressed={filter === option}
-                onClick={() => selectFilter(option)}
-                disabled={loading}
-              >
-                {option}
+          <label className="al-search">
+            <Search size={16} aria-hidden="true" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Search by unit, project, company, or location..."
+              aria-label="Search apartments"
+            />
+            {searchQuery && (
+              <button type="button" className="al-search-clear" aria-label="Clear search" onClick={clearSearch}>
+                <X size={15} />
               </button>
-            ))}
-          </div>
+            )}
+          </label>
         </div>
       </Reveal>
 
@@ -190,7 +221,7 @@ export default function ApartmentsListView() {
         <NeonPanel className="al-empty">
           <h2>{emptyHeading}</h2>
           <p>{emptyCopy}</p>
-          {filter !== 'All' && <GlowButton onClick={() => selectFilter('All')}>View all apartments</GlowButton>}
+          {isSearchMiss && <GlowButton onClick={clearSearch}>Clear search</GlowButton>}
         </NeonPanel>
       )}
 

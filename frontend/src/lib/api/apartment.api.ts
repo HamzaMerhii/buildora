@@ -152,6 +152,92 @@ export async function getApartment(
   return mapApartmentResponseToFrontend(raw);
 }
 
+// ---------------------------------------------------------------------------
+// Company-wide paginated management list:
+// GET /companies/{company_id}/apartments?page=..&page_size=..
+// One request per page — replaces the hierarchy fan-out for the admin
+// workspace list. The floor-scoped helpers below are preserved for the
+// project page, detail chain resolution, forms, and leads.
+// ---------------------------------------------------------------------------
+
+/** Wire shape: ApartmentResponse plus hierarchy context (snake_case). */
+export interface BackendCompanyApartment extends BackendApartment {
+  project_id: string;
+  project_name: string;
+  building_id: string;
+  building_name: string;
+  floor_name: string;
+}
+
+export interface BackendCompanyApartmentsPage {
+  items: BackendCompanyApartment[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+  status_counts: { available: number; reserved: number; sold: number };
+}
+
+export interface CompanyApartmentsPage {
+  items: ApiApartmentWithParents[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  available: number;
+  reserved: number;
+  sold: number;
+}
+
+export interface CompanyApartmentsQuery {
+  page?: number;
+  pageSize?: number;
+  projectId?: string;
+  buildingId?: string;
+  status?: FrontendApartmentStatus;
+  isPublic?: boolean;
+}
+
+function mapCompanyApartmentToFrontend(a: BackendCompanyApartment): ApiApartmentWithParents {
+  return {
+    ...mapApartmentResponseToFrontend(a),
+    projectId: a.project_id,
+    buildingId: a.building_id,
+    projectName: a.project_name,
+    buildingName: a.building_name,
+    floorName: a.floor_name,
+  };
+}
+
+export async function getCompanyApartmentsPage(
+  companyId: string,
+  query: CompanyApartmentsQuery = {},
+): Promise<CompanyApartmentsPage> {
+  const raw = await apiJson<BackendCompanyApartmentsPage>(
+    `/companies/${companyId}/apartments`,
+    {
+      query: {
+        page: query.page ?? 1,
+        page_size: query.pageSize ?? 6,
+        project_id: query.projectId || undefined,
+        building_id: query.buildingId || undefined,
+        status: query.status ? toBackendApartmentStatus(query.status) : undefined,
+        is_public: query.isPublic,
+      },
+    },
+  );
+  return {
+    items: raw.items.map(mapCompanyApartmentToFrontend),
+    page: raw.page,
+    pageSize: raw.page_size,
+    total: raw.total,
+    totalPages: raw.total_pages,
+    available: raw.status_counts.available,
+    reserved: raw.status_counts.reserved,
+    sold: raw.status_counts.sold,
+  };
+}
+
 export interface CreateApartmentInput {
   unitNumber: string;
   area?: number | string;

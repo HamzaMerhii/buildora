@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
@@ -370,6 +370,7 @@ def get_public_company_details(
 def get_public_apartments(
     db: Session,
     company_id: Optional[UUID] = None,
+    search: Optional[str] = None,
     page: int = 1,
     page_size: int = 9,
 ):
@@ -409,10 +410,41 @@ def get_public_apartments(
         Company.is_active.is_(True),
     ]
 
+    # =========================================================
+    # Company filter
+    # =========================================================
+
     if company_id is not None:
         filters.append(
             Company.id == company_id
         )
+
+    # =========================================================
+    # Search
+    # =========================================================
+
+    if search is not None:
+        normalized_search = search.strip()
+
+        if normalized_search:
+            search_pattern = f"%{normalized_search}%"
+
+            filters.append(
+                or_(
+                    Apartment.unit_number.ilike(
+                        search_pattern
+                    ),
+                    Project.name.ilike(
+                        search_pattern
+                    ),
+                    Project.location.ilike(
+                        search_pattern
+                    ),
+                    Company.name.ilike(
+                        search_pattern
+                    ),
+                )
+            )
 
     # =========================================================
     # Total count
@@ -541,9 +573,11 @@ def get_public_apartments(
         ) in rows
     ]
 
-    total_pages = ceil(
-        total / page_size
-    ) if total > 0 else 0
+    total_pages = (
+        ceil(total / page_size)
+        if total > 0
+        else 0
+    )
 
     return {
         "items": items,

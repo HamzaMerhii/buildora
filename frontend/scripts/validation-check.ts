@@ -525,6 +525,36 @@ check(
   }).images[0]?.url === 'https://img/u1',
   "apartment response embeds image urls",
 );
+const apartmentsApiSrc = readFileSync(
+  join(process.cwd(), "src/components/features/ApartmentsApi.tsx"),
+  "utf8",
+);
+check(
+  apartmentsApiSrc.includes('getCompanyApartmentsPage') &&
+    apartmentsApiSrc.includes('serverPagination'),
+  'admin apartment list uses the single paginated company endpoint',
+);
+check(
+  !apartmentsApiSrc.includes('getCompanyApartments('),
+  'admin apartment list no longer fans out hierarchy traversal',
+);
+const apartmentApiSrc = readFileSync(
+  join(process.cwd(), "src/lib/api/apartment.api.ts"),
+  "utf8",
+);
+check(
+  apartmentApiSrc.includes('/companies/${companyId}/apartments') &&
+    apartmentApiSrc.includes('status_counts'),
+  'company apartments client maps the backend pagination envelope',
+);
+const dataTableSrc = readFileSync(
+  join(process.cwd(), "src/components/ui/DataTable.tsx"),
+  "utf8",
+);
+check(
+  dataTableSrc.includes('serverPagination'),
+  'DataTable supports server-driven pagination mode',
+);
 check(
   !('currency' in mapApartmentFormToCreate({
     projectId: 'p1', buildingId: 'b1', floorId: 'f1', number: '201',

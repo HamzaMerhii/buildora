@@ -8,12 +8,15 @@ import { canAccess } from '@/lib/auth/permissions';
 import {
   clearApartmentIndex,
   getApartmentById,
-  getCompanyApartments,
+  getCompanyApartmentsPage,
   getProjectApartments,
   updateApartment,
   type ApiApartmentWithParents,
+  type CompanyApartmentsPage,
+  type CompanyApartmentsQuery,
 } from '@/lib/api/apartment.api';
-import { getProject } from '@/lib/api/project.api';
+import { getProject, getProjects } from '@/lib/api/project.api';
+import { getBuildings } from '@/lib/api/building.api';
 import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { money } from '@/lib/utils/format';
 import {
@@ -26,7 +29,7 @@ import {
   EmptyState,
   DetailList,
 } from '../ui/Primitives';
-import { DataTable } from '../ui/DataTable';
+import { DataTable, type Column } from '../ui/DataTable';
 
 const FALLBACK_IMAGE = '/images/33b403bb7596.webp';
 
@@ -139,6 +142,53 @@ function AvailabilityDonut({
   );
 }
 
+function apartmentColumns(showProject: boolean): Column<ApiApartmentWithParents>[] {
+  return [
+    {
+      label: 'Apartment',
+      value: (a) => (
+        <Link href={'/app/apartments/' + a.id}>
+          <strong>Apartment {a.number}</strong>
+        </Link>
+      ),
+      sort: (a) => a.number,
+    },
+    ...(showProject
+      ? [{ label: 'Project', value: (a: ApiApartmentWithParents) => a.projectName }]
+      : []),
+    {
+      label: 'Building / Floor',
+      value: (a) => (
+        <>
+          {a.buildingName}
+          <small>{a.floorName}</small>
+        </>
+      ),
+    },
+    { label: 'Area', value: (a) => (a.area === null ? '—' : a.area + ' sqm'), sort: (a) => a.area ?? 0 },
+    {
+      label: 'Beds / Baths',
+      value: (a) => `${a.bedrooms ?? '—'} / ${a.bathrooms ?? '—'}`,
+    },
+    {
+      label: 'Price',
+      value: (a) => (a.price === null ? '—' : money(a.price)),
+      sort: (a) => a.price ?? 0,
+    },
+    { label: 'Status', value: (a) => <Badge value={a.status} /> },
+    { label: 'Visibility', value: (a) => (a.isPublic ? 'Public' : 'Private') },
+    {
+      label: 'Actions',
+      value: (a) => (
+        <div className="row-actions">
+          <Link href={'/app/apartments/' + a.id}>View</Link>
+          <Link href={'/app/apartments/' + a.id + '/edit'}>Edit</Link>
+        </div>
+      ),
+    },
+  ];
+}
+
 function ApartmentTable({
   rows,
   showProject,
@@ -214,69 +264,35 @@ function ApartmentTable({
       filters={filters}
       placeholder="Search apartments by number, building…"
       searchText={(a) => a.number + ' ' + (a.buildingName ?? '')}
-      columns={[
-        {
-          label: 'Apartment',
-          value: (a) => (
-            <Link href={'/app/apartments/' + a.id}>
-              <strong>Apartment {a.number}</strong>
-            </Link>
-          ),
-          sort: (a) => a.number,
-        },
-        ...(showProject
-          ? [{ label: 'Project', value: (a: ApiApartmentWithParents) => a.projectName }]
-          : []),
-        {
-          label: 'Building / Floor',
-          value: (a) => (
-            <>
-              {a.buildingName}
-              <small>{a.floorName}</small>
-            </>
-          ),
-        },
-        { label: 'Area', value: (a) => (a.area === null ? '—' : a.area + ' sqm'), sort: (a) => a.area ?? 0 },
-        {
-          label: 'Beds / Baths',
-          value: (a) => `${a.bedrooms ?? '—'} / ${a.bathrooms ?? '—'}`,
-        },
-        {
-          label: 'Price',
-          value: (a) => (a.price === null ? '—' : money(a.price)),
-          sort: (a) => a.price ?? 0,
-        },
-        { label: 'Status', value: (a) => <Badge value={a.status} /> },
-        { label: 'Visibility', value: (a) => (a.isPublic ? 'Public' : 'Private') },
-        {
-          label: 'Actions',
-          value: (a) => (
-            <div className="row-actions">
-              <Link href={'/app/apartments/' + a.id}>View</Link>
-              <Link href={'/app/apartments/' + a.id + '/edit'}>Edit</Link>
-            </div>
-          ),
-        },
-      ]}
+      columns={apartmentColumns(showProject)}
     />
   );
 }
 
 /**
- * Company-wide apartment inventory. No global backend endpoint exists,
- * so this traverses project → building → floor → apartment through the
- * real scoped endpoints (parallelized, indexed per company).
+ * Company-wide apartment inventory. Uses the single paginated management
+ * endpoint (GET /companies/{company_id}/apartments/) — one request per
+ * page. Project/building dropdown options come from the lightweight
+ * project + building endpoints; filters are server-side query params so
+ * they cover the full dataset, not just the visible page.
  */
+const WORKSPACE_PAGE_SIZE = 6;
+
 export function ApartmentsWorkspaceList() {
   const companyId = useAuthStore((s) => s.companyId);
   const companyRole = useAuthStore((s) => s.companyRole);
-  const [rows, setRows] = useState<ApiApartmentWithParents[]>([]);
+  const [data, setData] = useState<CompanyApartmentsPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const [project, setProject] = useState('');
   const [building, setBuilding] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [visibility, setVisibility] = useState('');
+  const [projectOptions, setProjectOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [buildingOptions, setBuildingOptions] = useState<Array<{ id: string; name: string; projectId: string }>>([]);
 
-  const fetchAll = useCallback(async () => {
+  const fetchPage = useCallback(async () => {
     if (!companyId) {
       setLoading(false);
       setError('No company context. Please sign in again.');
@@ -284,8 +300,18 @@ export function ApartmentsWorkspaceList() {
     }
     setLoading(true);
     setError(null);
+    setData(null);
     try {
-      setRows(await getCompanyApartments(companyId));
+      setData(
+        await getCompanyApartmentsPage(companyId, {
+          page,
+          pageSize: WORKSPACE_PAGE_SIZE,
+          projectId: project || undefined,
+          buildingId: building || undefined,
+          status: (statusFilter || undefined) as CompanyApartmentsQuery['status'],
+          isPublic: visibility === '' ? undefined : visibility === 'true',
+        }),
+      );
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
         setError('You do not have access to apartments for this company.');
@@ -294,32 +320,139 @@ export function ApartmentsWorkspaceList() {
       } else {
         setError(friendlyMessage(err));
       }
-      setRows([]);
+      setData(null);
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, page, project, building, statusFilter, visibility]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- inventory load on mount */
   useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+    fetchPage();
+  }, [fetchPage]);
+
+  useEffect(() => {
+    if (!companyId) {
+      setProjectOptions([]);
+      setBuildingOptions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const projects = await getProjects(companyId, { limit: 100 });
+        if (cancelled) return;
+        setProjectOptions(projects.map((p) => ({ id: p.id, name: p.name })));
+        const perProject = await Promise.all(
+          projects.map(async (p) => {
+            const buildings = await getBuildings(companyId, p.id).catch(() => []);
+            return buildings.map((b) => ({ id: b.id, name: b.name, projectId: p.id }));
+          }),
+        );
+        if (!cancelled) setBuildingOptions(perProject.flat());
+      } catch {
+        if (!cancelled) {
+          setProjectOptions([]);
+          setBuildingOptions([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Company switch resets to the first page with cleared scope filters.
+  const activeCompany = companyId ?? '';
+  const [seenCompany, setSeenCompany] = useState(activeCompany);
+  if (seenCompany !== activeCompany) {
+    setSeenCompany(activeCompany);
+    setPage(1);
+    setProject('');
+    setBuilding('');
+    setStatusFilter('');
+    setVisibility('');
+  }
+
   const canMutate = !companyRole || canAccess(companyRole, 'apartments-mutate');
-  const projectOptions = [...new Map(rows.map((a) => [a.projectId, a.projectName ?? a.projectId])).entries()].map(
-    ([id, name]) => ({ id, name }),
+  const visibleBuildings = buildingOptions.filter((b) => !project || b.projectId === project);
+  const rows = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
+  const available = data?.available ?? 0;
+  const reserved = data?.reserved ?? 0;
+  const sold = data?.sold ?? 0;
+
+  function goToPage(next: number) {
+    const clamped = Math.min(Math.max(1, next), Math.max(1, totalPages));
+    if (clamped !== page) setPage(clamped);
+  }
+
+  const filters = (
+    <>
+      <select
+        aria-label="Filter by project"
+        value={project}
+        disabled={loading}
+        onChange={(e) => {
+          setProject(e.target.value);
+          setBuilding('');
+          setPage(1);
+        }}
+      >
+        <option value="">All Projects</option>
+        {projectOptions.map((p) => (
+          <option value={p.id} key={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Filter by building"
+        value={building}
+        disabled={loading}
+        onChange={(e) => {
+          setBuilding(e.target.value);
+          setPage(1);
+        }}
+      >
+        <option value="">All Buildings</option>
+        {visibleBuildings.map((b) => (
+          <option value={b.id} key={b.id}>
+            {b.name}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Filter by status"
+        value={statusFilter}
+        disabled={loading}
+        onChange={(e) => {
+          setStatusFilter(e.target.value);
+          setPage(1);
+        }}
+      >
+        <option value="">All Statuses</option>
+        <option value="AVAILABLE">Available</option>
+        <option value="RESERVED">Reserved</option>
+        <option value="SOLD">Sold</option>
+      </select>
+      <select
+        aria-label="Visibility"
+        value={visibility}
+        disabled={loading}
+        onChange={(e) => {
+          setVisibility(e.target.value);
+          setPage(1);
+        }}
+      >
+        <option value="">All Visibility</option>
+        <option value="true">Public</option>
+        <option value="false">Private</option>
+      </select>
+    </>
   );
-  const buildingOptions = [
-    ...new Map(
-      rows
-        .filter((a) => !project || a.projectId === project)
-        .map((a) => [a.buildingId, a.buildingName ?? a.buildingId]),
-    ).entries(),
-  ].map(([id, name]) => ({ id, name }));
-  const available = rows.filter((a) => a.status === 'AVAILABLE').length;
-  const reserved = rows.filter((a) => a.status === 'RESERVED').length;
-  const sold = rows.filter((a) => a.status === 'SOLD').length;
 
   return (
     <>
@@ -339,31 +472,35 @@ export function ApartmentsWorkspaceList() {
           Loading apartments…
         </p>
       ) : error ? (
-        <ListError message={error} onRetry={fetchAll} />
+        <ListError message={error} onRetry={fetchPage} />
+      ) : data && total === 0 ? (
+        <EmptyState title="No apartments yet" description="No apartments have been created yet." />
       ) : (
         <>
           <div className="stats">
-            <StatCard label="Total Apartments" value={rows.length} />
+            <StatCard label="Total Apartments" value={total} />
             <StatCard label="Available" value={available} detail="Ready for sale" />
             <StatCard label="Reserved" value={reserved} detail="Awaiting completion" />
             <StatCard label="Sold" value={sold} detail="Handed over" />
           </div>
-          <ApartmentTable
+          <DataTable
             rows={rows}
-            showProject
-            projectOptions={projectOptions}
-            buildingOptions={buildingOptions}
-            project={project}
-            building={building}
-            onProjectChange={(v) => {
-              setProject(v);
-              setBuilding('');
+            filters={filters}
+            placeholder="Search apartments by number, building…"
+            searchText={(a) => a.number + ' ' + (a.buildingName ?? '')}
+            columns={apartmentColumns(true)}
+            serverPagination={{
+              page,
+              totalPages,
+              total,
+              pageSize: WORKSPACE_PAGE_SIZE,
+              onPageChange: goToPage,
+              loading,
             }}
-            onBuildingChange={setBuilding}
           />
           <div className="section-space">
             <Panel title="Availability Split" subtitle="Company-wide inventory by status">
-              <AvailabilityDonut available={available} reserved={reserved} sold={sold} total={rows.length} />
+              <AvailabilityDonut available={available} reserved={reserved} sold={sold} total={available + reserved + sold} />
             </Panel>
           </div>
         </>

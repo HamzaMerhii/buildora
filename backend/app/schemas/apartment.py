@@ -100,3 +100,42 @@ class ApartmentResponse(BaseSchema):
 
     created_at: datetime
     updated_at: datetime
+
+
+class ApartmentStatusCounts(BaseSchema):
+    available: int = 0
+    reserved: int = 0
+    sold: int = 0
+
+
+class CompanyApartmentResponse(ApartmentResponse):
+    """Management list item: floor-level fields plus hierarchy context."""
+
+    project_id: UUID
+    project_name: str
+    building_id: UUID
+    building_name: str
+    floor_name: str
+
+
+class PaginatedCompanyApartmentResponse(BaseSchema):
+    """GET /companies/{company_id}/apartments/ page envelope."""
+
+    items: list[CompanyApartmentResponse]
+
+    page: int
+    page_size: int
+
+    total: int
+    total_pages: int
+
+    status_counts: ApartmentStatusCounts
+
+
+class ApartmentPaginatedResponse(BaseSchema):
+    items: list[ApartmentResponse]
+
+    page: int
+    page_size: int
+    total: int
+    total_pages: int

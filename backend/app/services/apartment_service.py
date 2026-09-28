@@ -1,7 +1,9 @@
+from math import ceil
 from uuid import UUID
+from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
@@ -11,6 +13,7 @@ from app.models import (
     Apartment,
     ApartmentImage,
 )
+from app.models.apartment import ApartmentStatus
 from app.schemas.apartment import ApartmentCreate, ApartmentUpdate
 
 
@@ -199,14 +202,44 @@ def update_apartment(
 
 
 
+from math import ceil
+from uuid import UUID
+
+from fastapi import HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
+
+from app.models.apartment import Apartment
+from app.models.building import Building
+from app.models.floor import Floor
+from app.models.project import Project
+
+
 def get_floor_apartments(
     company_id: UUID,
     project_id: UUID,
     building_id: UUID,
     floor_id: UUID,
     db: Session,
+    page: int = 1,
+    page_size: int = 9,
 ):
+    # =========================================================
+    # Pagination safety
+    # =========================================================
+
+    if page < 1:
+        page = 1
+
+    if page_size < 1:
+        page_size = 9
+
+    offset = (page - 1) * page_size
+
+    # =========================================================
     # Verify project belongs to company
+    # =========================================================
+
     project = db.scalar(
         select(Project).where(
             Project.id == project_id,
@@ -220,7 +253,10 @@ def get_floor_apartments(
             detail="Project not found",
         )
 
+    # =========================================================
     # Verify building belongs to project
+    # =========================================================
+
     building = db.scalar(
         select(Building).where(
             Building.id == building_id,
@@ -234,7 +270,10 @@ def get_floor_apartments(
             detail="Building not found",
         )
 
+    # =========================================================
     # Verify floor belongs to building
+    # =========================================================
+
     floor = db.scalar(
         select(Floor).where(
             Floor.id == floor_id,
@@ -248,18 +287,51 @@ def get_floor_apartments(
             detail="Floor not found",
         )
 
+    # =========================================================
+    # Total apartments on this floor
+    # =========================================================
+
+    total = db.scalar(
+        select(
+            func.count(Apartment.id)
+        )
+        .where(
+            Apartment.floor_id == floor_id
+        )
+    ) or 0
+
+    # =========================================================
+    # Paginated apartments
+    # =========================================================
+
     apartments = db.scalars(
         select(Apartment)
         .where(
             Apartment.floor_id == floor_id
         )
-        .options(selectinload(Apartment.images))
+        .options(
+            selectinload(Apartment.images)
+        )
         .order_by(
             Apartment.unit_number.asc()
         )
+        .offset(offset)
+        .limit(page_size)
     ).all()
 
-    return apartments
+    total_pages = (
+        ceil(total / page_size)
+        if total > 0
+        else 0
+    )
+
+    return {
+        "items": apartments,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+    }
 
 
 def get_apartment_details(
@@ -501,3 +573,135 @@ def remove_apartment_image(
 
     db.delete(apartment_image)
     db.commit()
+
+
+def get_company_apartments(
+    company_id: UUID,
+    db: Session,
+    page: int = 1,
+    page_size: int = 10,
+    project_id: Optional[UUID] = None,
+    building_id: Optional[UUID] = None,
+    status: Optional[ApartmentStatus] = None,
+    is_public: Optional[bool] = None,
+):
+    """Company-wide management apartment list in a single SQL query.
+
+    Joins Apartment → Floor → Building → Project and scopes with
+    Project.company_id == company_id, so apartments from other
+    companies can never leak. Optional project/building/status/
+    visibility filters narrow the same scope (a foreign project or
+    building id simply matches zero rows).
+
+    Returns (items, total, status_counts) where items are dicts
+    matching CompanyApartmentResponse and status_counts covers the
+    company/project/building scope ignoring the status/is_public
+    filters, so the dashboard availability split stays meaningful.
+    """
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 10
+    if page_size > 100:
+        page_size = 100
+    offset = (page - 1) * page_size
+
+    scope = [Project.company_id == company_id]
+    if project_id is not None:
+        scope.append(Project.id == project_id)
+    if building_id is not None:
+        scope.append(Building.id == building_id)
+
+    item_conditions = list(scope)
+    if status is not None:
+        item_conditions.append(Apartment.status == status)
+    if is_public is not None:
+        item_conditions.append(Apartment.is_public == is_public)
+
+    total = db.scalar(
+        select(func.count(Apartment.id)).select_from(Apartment)
+        .join(Floor, Apartment.floor_id == Floor.id)
+        .join(Building, Floor.building_id == Building.id)
+        .join(Project, Building.project_id == Project.id)
+        .where(*item_conditions)
+    ) or 0
+
+    count_rows = db.execute(
+        select(Apartment.status, func.count(Apartment.id))
+        .select_from(Apartment)
+        .join(Floor, Apartment.floor_id == Floor.id)
+        .join(Building, Floor.building_id == Building.id)
+        .join(Project, Building.project_id == Project.id)
+        .where(*scope)
+        .group_by(Apartment.status)
+    ).all()
+    counts = {"available": 0, "reserved": 0, "sold": 0}
+    for value, amount in count_rows:
+        key = value.value if isinstance(value, ApartmentStatus) else str(value)
+        if key in counts:
+            counts[key] = int(amount)
+
+    rows = db.execute(
+        select(
+            Apartment,
+            Project.id.label("row_project_id"),
+            Project.name.label("row_project_name"),
+            Building.id.label("row_building_id"),
+            Building.name.label("row_building_name"),
+            Floor.name.label("row_floor_name"),
+        )
+        .select_from(Apartment)
+        .join(Floor, Apartment.floor_id == Floor.id)
+        .join(Building, Floor.building_id == Building.id)
+        .join(Project, Building.project_id == Project.id)
+        .where(*item_conditions)
+        .options(selectinload(Apartment.images))
+        .order_by(
+            Project.name.asc(),
+            Building.name.asc(),
+            Floor.floor_number.asc(),
+            Apartment.unit_number.asc(),
+            Apartment.id.asc(),
+        )
+        .offset(offset)
+        .limit(page_size)
+    ).all()
+
+    items = []
+    for apartment, row_project_id, row_project_name, row_building_id, row_building_name, row_floor_name in rows:
+        items.append(
+            {
+                "id": apartment.id,
+                "floor_id": apartment.floor_id,
+                "unit_number": apartment.unit_number,
+                "area_sqm": apartment.area_sqm,
+                "bedrooms": apartment.bedrooms,
+                "bathrooms": apartment.bathrooms,
+                "price": apartment.price,
+                "status": apartment.status,
+                "is_public": apartment.is_public,
+                "description": apartment.description,
+                "images": [
+                    {"id": image.id, "image_url": image.image_url}
+                    for image in (apartment.images or [])
+                ],
+                "created_at": apartment.created_at,
+                "updated_at": apartment.updated_at,
+                "project_id": row_project_id,
+                "project_name": row_project_name,
+                "building_id": row_building_id,
+                "building_name": row_building_name,
+                "floor_name": row_floor_name,
+            }
+        )
+
+    total_pages = ceil(total / page_size) if total > 0 else 0
+
+    return {
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+        "status_counts": counts,
+    }

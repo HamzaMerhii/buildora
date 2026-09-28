@@ -2,7 +2,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from app.models import User
 from app.models.apartment import ApartmentStatus
 from app.schemas.apartment import (
     ApartmentCreate,
+    ApartmentPaginatedResponse,
     ApartmentResponse,
     ApartmentUpdate,
 )
@@ -122,13 +123,25 @@ def update_existing_apartment(
 
 @router.get(
     "/",
-    response_model=list[ApartmentResponse],
+    response_model=ApartmentPaginatedResponse,
 )
 def list_apartments(
     company_id: UUID,
     project_id: UUID,
     building_id: UUID,
     floor_id: UUID,
+
+    page: int = Query(
+        1,
+        ge=1,
+    ),
+
+    page_size: int = Query(
+        9,
+        ge=1,
+        le=100,
+    ),
+
     db: Session = Depends(get_db),
     current_user: User = Depends(require_project_manager),
 ):
@@ -137,6 +150,8 @@ def list_apartments(
         project_id=project_id,
         building_id=building_id,
         floor_id=floor_id,
+        page=page,
+        page_size=page_size,
         db=db,
     )
 @router.get(

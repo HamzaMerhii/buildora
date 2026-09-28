@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import jwt
+from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
 from app.core.config import settings
 password_hash = PasswordHash.recommended()
@@ -63,11 +64,16 @@ def create_password_reset_token(user_id: str) -> str:
 
 
 def verify_password_reset_token(token: str) -> str | None:
-        payload = jwt.decode(
-            token,
-            settings.secret_key,
-            algorithms=[settings.algorithm],
-        )
+        try:
+            payload = jwt.decode(
+                token,
+                settings.secret_key,
+                algorithms=[settings.algorithm],
+            )
+        except InvalidTokenError:
+            # Expired, malformed, or wrongly-signed tokens all map to the
+            # controlled 400 handled by the caller. Never leak JWT details.
+            return None
 
         if payload.get("type") != "password_reset":
             return None
