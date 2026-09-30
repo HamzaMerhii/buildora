@@ -547,6 +547,17 @@ check(
     apartmentApiSrc.includes('status_counts'),
   'company apartments client maps the backend pagination envelope',
 );
+check(
+  apartmentApiSrc.includes('sharedCompanyApartments') &&
+    !apartmentApiSrc.includes('function getCompanyApartments(') &&
+    !apartmentApiSrc.includes('let apartmentIndex'),
+  'apartment chain resolution shares one paginated walk, old fan-out removed',
+);
+check(
+  !apartmentApiSrc.includes('getProjects(') &&
+    !apartmentApiSrc.includes('getFloors('),
+  'apartment api performs no hierarchy traversal',
+);
 const dataTableSrc = readFileSync(
   join(process.cwd(), "src/components/ui/DataTable.tsx"),
   "utf8",
@@ -554,6 +565,44 @@ const dataTableSrc = readFileSync(
 check(
   dataTableSrc.includes('serverPagination'),
   'DataTable supports server-driven pagination mode',
+);
+const clientSrc = readFileSync(
+  join(process.cwd(), "src/lib/api/client.ts"),
+  "utf8",
+);
+check(
+  clientSrc.includes('inflight') && clientSrc.includes('fetchJson'),
+  'central API client dedupes identical simultaneous GET requests',
+);
+const projectsApiSrc = readFileSync(
+  join(process.cwd(), "src/components/features/ProjectsApi.tsx"),
+  "utf8",
+);
+check(
+  projectsApiSrc.includes('getCompanyDashboardTasks') &&
+    !projectsApiSrc.includes('floors.map((f) => getApartments'),
+  'project overview loads tasks once and skips the deep apartment fan-out',
+);
+check(
+  projectsApiSrc.includes('taskDetailHref(t.id'),
+  'project overview task links carry chain hints for fast detail loads',
+);
+const tasksApiSrc = readFileSync(
+  join(process.cwd(), "src/components/features/TasksApi.tsx"),
+  "utf8",
+);
+check(
+  tasksApiSrc.includes('taskDetailHref') && tasksApiSrc.includes('hintProjectId'),
+  'task tables link with chain hints to avoid traversal',
+);
+const leadsApiSrc = readFileSync(
+  join(process.cwd(), "src/components/features/LeadsApi.tsx"),
+  "utf8",
+);
+check(
+  leadsApiSrc.includes('sharedCompanyApartments') &&
+    !leadsApiSrc.includes('getCompanyApartments('),
+  'leads apartment lookup uses the shared paginated walk, not the fan-out',
 );
 check(
   !('currency' in mapApartmentFormToCreate({

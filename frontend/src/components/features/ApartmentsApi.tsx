@@ -529,8 +529,7 @@ export function ApartmentsProjectList({ projectId }: { projectId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const project = await getProject(companyId, projectId).catch(() => null);
-      setRows(await getProjectApartments(companyId, projectId, project?.name));
+      setRows(await getProjectApartments(companyId, projectId));
     } catch (err) {
       if (err instanceof ApiError && (err.status === 404 || err.status === 422)) {
         setError('Project not found.');

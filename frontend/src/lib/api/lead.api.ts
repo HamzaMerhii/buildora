@@ -1,5 +1,5 @@
 import { ApiError, apiJson } from './client';
-import { getCompanyApartments } from './apartment.api';
+import { sharedCompanyApartments } from './apartment.api';
 
 /**
  * Lead endpoints (verified against backend/app/routers/lead.py,
@@ -140,7 +140,7 @@ export async function resolveLeadChain(
   apartmentId?: string,
 ): Promise<LeadChain> {
   try {
-    const apartments = await getCompanyApartments(companyId);
+    const apartments = await sharedCompanyApartments(companyId);
     const found = apartmentId
       ? apartments.find((a) => a.id === apartmentId)
       : apartments[0];

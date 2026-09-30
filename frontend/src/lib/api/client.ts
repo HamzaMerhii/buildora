@@ -109,6 +109,12 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * In-flight GET registry. Identical simultaneous requests share one
+ * network call; entries are removed on settle (never a stale cache).
+ */
+const inflight = new Map<string, Promise<unknown>>();
+
 function authHeaders(auth: boolean | undefined): Record<string, string> {
   if (auth === false) return {};
   const token = useAuthStore.getState().accessToken;
@@ -120,9 +126,31 @@ export async function apiJson<T>(
   path: string,
   options: RequestOptions & { method?: string; body?: unknown } = {},
 ): Promise<T> {
+  const method = options.method ?? 'GET';
+  // Dedupe identical simultaneous GETs (StrictMode double-mount,
+  // parent+child overlaps, index warm-up races): one network request,
+  // shared promise. Mutations, bodies, and signalled requests bypass.
+  if (method === 'GET' && options.body === undefined && !options.signal) {
+    const url = buildUrl(path, options.query);
+    const key = `GET ${url}`;
+    const pending = inflight.get(key);
+    if (pending) return pending as Promise<T>;
+    const request = fetchJson<T>(url, options).finally(() => {
+      if (inflight.get(key) === request) inflight.delete(key);
+    });
+    inflight.set(key, request);
+    return request;
+  }
+  return fetchJson<T>(buildUrl(path, options.query), options);
+}
+
+async function fetchJson<T>(
+  url: string,
+  options: RequestOptions & { method?: string; body?: unknown },
+): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(buildUrl(path, options.query), {
+    response = await fetch(url, {
       method: options.method ?? 'GET',
       headers: {
         'Content-Type': 'application/json',

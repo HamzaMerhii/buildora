@@ -13,6 +13,7 @@ import {
   getTaskUpdates,
   isTaskOverdue,
   resolveTaskChain,
+  taskDetailHref,
   type ApiTask,
   type ApiTaskUpdate,
 } from '@/lib/api/task.api';
@@ -136,11 +137,13 @@ export function TaskTableReal({
   sessionUser,
   partyNames,
   membersByUserId,
+  hintProjectId,
 }: {
   rows: ApiTask[];
   sessionUser: TaskSessionUser | null;
   partyNames: Map<string, string>;
   membersByUserId?: Map<string, ApiCompanyMember>;
+  hintProjectId?: string;
 }) {
   const memberMap = membersByUserId ?? new Map<string, ApiCompanyMember>();
   const [status, setStatus] = useState('');
@@ -161,7 +164,7 @@ export function TaskTableReal({
         {
           label: 'Task',
           value: (t) => (
-            <Link href={'/app/tasks/' + t.id}>
+            <Link href={taskDetailHref(t.id, { projectId: hintProjectId ?? t.projectId, stageId: t.stageId })}>
               <strong>{t.title}</strong>
             </Link>
           ),
@@ -180,7 +183,7 @@ export function TaskTableReal({
           label: 'Condition',
           value: (t) => <Badge value={isTaskOverdue(t.endDate, t.status) ? 'Overdue' : 'On Track'} />,
         },
-        { label: 'Actions', value: (t) => <TextLink href={'/app/tasks/' + t.id}>View Task</TextLink> },
+        { label: 'Actions', value: (t) => <TextLink href={taskDetailHref(t.id, { projectId: hintProjectId ?? t.projectId, stageId: t.stageId })}>View Task</TextLink> },
       ]}
     />
   );
@@ -232,7 +235,7 @@ export function StageTasksSection({
           </ButtonLink>
         </p>
       )}
-      <TaskTableReal rows={tasks} sessionUser={sessionUser} partyNames={partyNames} membersByUserId={membersByUserId} />
+      <TaskTableReal rows={tasks} sessionUser={sessionUser} partyNames={partyNames} membersByUserId={membersByUserId} hintProjectId={projectId ?? undefined} />
     </>
   );
 }

@@ -24,7 +24,7 @@ import {
 import { getProjects, type ApiProject, type FrontendProjectStatus } from '@/lib/api/project.api';
 import { getStages } from '@/lib/api/construction-stage.api';
 import { getCompanyLeads, type ApiLead } from '@/lib/api/lead.api';
-import { isTaskOverdue } from '@/lib/api/task.api';
+import { isTaskOverdue, taskDetailHref } from '@/lib/api/task.api';
 
 export function financialKpiValue(text: string) {
   const size = financialKpiFontSize(text);
@@ -122,7 +122,7 @@ function CriticalTasksPanel({ tasks }: { tasks: ApiDashboardTask[] }) {
           <div className="activity" key={t.id}>
             <span className="activity-dot" />
             <div>
-              <TextLink href={'/app/tasks/' + t.id}>{t.title}</TextLink>
+              <TextLink href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>{t.title}</TextLink>
               <p>
                 {t.projectName} · {t.stageName}
               </p>
@@ -923,8 +923,8 @@ function EngineerDashboard() {
                         label: 'Actions',
                         value: (t) => (
                           <div className="row-actions">
-                            <TextLink href={'/app/tasks/' + t.id}>View</TextLink>
-                            <TextLink href={'/app/tasks/' + t.id + '/updates/new'}>Add Update</TextLink>
+                            <TextLink href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>View</TextLink>
+                            <TextLink href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId }) + '/updates/new'}>Add Update</TextLink>
                           </div>
                         ),
                       },
@@ -956,7 +956,7 @@ function EngineerDashboard() {
                     <div className="activity" key={t.id}>
                       <span className="activity-dot" />
                       <div>
-                        <TextLink href={'/app/tasks/' + t.id}>{t.title}</TextLink>
+                        <TextLink href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>{t.title}</TextLink>
                         <p>
                           {t.projectName} · {taskDueLabel(t.endDate, t.status)}
                         </p>

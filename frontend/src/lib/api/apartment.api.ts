@@ -1,9 +1,6 @@
 import { ApiError, apiForm, apiJson } from './client';
 import type { z } from 'zod';
 import type { apartmentEditSchema } from '../validations/apartment.schema';
-import { getProjects } from './project.api';
-import { getBuildings } from './building.api';
-import { getFloors } from './floor.api';
 
 /**
  * Apartment endpoints (verified against backend/app/routers/apartment.py).
@@ -208,6 +205,26 @@ export interface CompanyApartmentsQuery {
   buildingId?: string;
   status?: FrontendApartmentStatus;
   isPublic?: boolean;
+}
+
+/** Bounded full-collection read over the paginated company endpoint. */
+export async function getAllCompanyApartments(
+  companyId: string,
+  query: Omit<CompanyApartmentsQuery, 'page' | 'pageSize'> = {},
+): Promise<ApiApartmentWithParents[]> {
+  const items: ApiApartmentWithParents[] = [];
+  let page = 1;
+  for (;;) {
+    const response = await getCompanyApartmentsPage(companyId, {
+      ...query,
+      page,
+      pageSize: 100,
+    });
+    items.push(...response.items);
+    if (page >= response.totalPages || response.items.length === 0) break;
+    page += 1;
+  }
+  return items;
 }
 
 function mapCompanyApartmentToFrontend(a: BackendCompanyApartment): ApiApartmentWithParents {
@@ -483,83 +500,41 @@ export interface ApiApartmentWithParents extends ApiApartment {
   floorName?: string;
 }
 
-let apartmentIndex: { companyId: string; byId: Map<string, ApiApartmentWithParents> } | null =
-  null;
+/**
+ * Shared full-company apartment read. One bounded page walk per
+ * company, shared across same-page consumers (list labels, chain
+ * resolution, selectors) — sequential walkers cannot share via
+ * in-flight dedup alone. Cleared by clearApartmentIndex on mutation.
+ */
+let sharedApartmentWalk: {
+  companyId: string;
+  promise: Promise<ApiApartmentWithParents[]>;
+} | null = null;
 
 export function clearApartmentIndex(companyId?: string): void {
-  if (!companyId || apartmentIndex?.companyId === companyId) apartmentIndex = null;
+  if (!companyId || sharedApartmentWalk?.companyId === companyId) {
+    sharedApartmentWalk = null;
+  }
 }
 
-function annotate(
-  a: ApiApartment,
-  parents: { projectId: string; buildingId: string; projectName?: string; buildingName?: string; floorName?: string },
-): ApiApartmentWithParents {
-  return { ...a, ...parents };
+export function sharedCompanyApartments(companyId: string): Promise<ApiApartmentWithParents[]> {
+  if (sharedApartmentWalk?.companyId !== companyId) {
+    const promise = getAllCompanyApartments(companyId);
+    sharedApartmentWalk = { companyId, promise };
+    // Rejected walks must not stick: the next caller retries fresh.
+    promise.catch(() => {
+      if (sharedApartmentWalk?.promise === promise) sharedApartmentWalk = null;
+    });
+  }
+  return sharedApartmentWalk.promise;
 }
 
-/** All apartments in a company, via parallel hierarchy traversal. */
-export async function getCompanyApartments(companyId: string): Promise<ApiApartmentWithParents[]> {
-  if (apartmentIndex?.companyId === companyId) return [...apartmentIndex.byId.values()];
-  const projects = await getProjects(companyId, { limit: 100 });
-  const perProject = await Promise.all(
-    projects.map(async (project) => {
-      const buildings = await getBuildings(companyId, project.id);
-      const perBuilding = await Promise.all(
-        buildings.map(async (building) => {
-          const floors = await getFloors(companyId, project.id, building.id);
-          const perFloor = await Promise.all(
-            floors.map(async (floor) => {
-              const apartments = await getApartments(companyId, project.id, building.id, floor.id);
-              return apartments.map((a) =>
-                annotate(a, {
-                  projectId: project.id,
-                  buildingId: building.id,
-                  projectName: project.name,
-                  buildingName: building.name,
-                  floorName: floor.name,
-                }),
-              );
-            }),
-          );
-          return perFloor.flat();
-        }),
-      );
-      return perBuilding.flat();
-    }),
-  );
-  const all = perProject.flat();
-  apartmentIndex = { companyId, byId: new Map(all.map((a) => [a.id, a])) };
-  return all;
-}
-
-/** Apartments of one project, via parallel traversal of its hierarchy. */
+/** Apartments of one project, via the company endpoint project filter. */
 export async function getProjectApartments(
   companyId: string,
   projectId: string,
-  projectName?: string,
 ): Promise<ApiApartmentWithParents[]> {
-  const buildings = await getBuildings(companyId, projectId);
-  const perBuilding = await Promise.all(
-    buildings.map(async (building) => {
-      const floors = await getFloors(companyId, projectId, building.id);
-      const perFloor = await Promise.all(
-        floors.map(async (floor) => {
-          const apartments = await getApartments(companyId, projectId, building.id, floor.id);
-          return apartments.map((a) =>
-            annotate(a, {
-              projectId,
-              buildingId: building.id,
-              projectName,
-              buildingName: building.name,
-              floorName: floor.name,
-            }),
-          );
-        }),
-      );
-      return perFloor.flat();
-    }),
-  );
-  return perBuilding.flat();
+  return getAllCompanyApartments(companyId, { projectId });
 }
 
 export interface ApartmentChain {
@@ -576,10 +551,7 @@ export async function resolveApartmentChain(
   companyId: string,
   apartmentId: string,
 ): Promise<ApiApartmentWithParents> {
-  const cached =
-    apartmentIndex?.companyId === companyId ? apartmentIndex.byId.get(apartmentId) : undefined;
-  if (cached) return cached;
-  const found = (await getCompanyApartments(companyId)).find((a) => a.id === apartmentId);
+  const found = (await sharedCompanyApartments(companyId)).find((a) => a.id === apartmentId);
   if (!found) throw new ApiError(404, 'Apartment not found.');
   return found;
 }

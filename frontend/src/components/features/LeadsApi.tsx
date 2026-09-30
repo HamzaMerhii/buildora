@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Download, Pencil } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { canAccess } from '@/lib/auth/permissions';
-import { getCompanyApartments } from '@/lib/api/apartment.api';
+import { sharedCompanyApartments } from '@/lib/api/apartment.api';
 import {
   LEAD_STATUS_LABEL,
   getCompanyLeads,
@@ -53,8 +53,9 @@ export function unitLabel(apartmentId: string, numbersById: Map<string, string>)
 
 /**
  * Best-effort apartment unit-number lookup for lead rows. Resolves via
- * the company apartment index when the role may read it (OWNER); roles
- * without apartment access (SALES) fall back to short-id labels.
+ * the paginated company endpoint (bounded page walk, no hierarchy
+ * fan-out) when the role may read it (OWNER); roles without apartment
+ * access (SALES) fall back to short-id labels.
  */
 export function useApartmentNumbers(companyId: string | null): Map<string, string> {
   const [numbers, setNumbers] = useState<Map<string, string>>(new Map());
@@ -62,7 +63,7 @@ export function useApartmentNumbers(companyId: string | null): Map<string, strin
   useEffect(() => {
     if (!companyId) return;
     let cancelled = false;
-    getCompanyApartments(companyId)
+    sharedCompanyApartments(companyId)
       .then((list) => {
         if (!cancelled) setNumbers(new Map(list.map((a) => [a.id, a.number])));
       })

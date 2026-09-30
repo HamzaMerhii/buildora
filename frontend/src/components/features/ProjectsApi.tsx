@@ -25,8 +25,10 @@ import {
 } from '@/lib/api/land-record.api';
 import {
   getApartments,
+  getCompanyApartmentsPage,
   type ApiApartment,
 } from '@/lib/api/apartment.api';
+import { getCompanyDashboardTasks } from '@/lib/api/dashboard.api';
 import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { ProjectPaymentsSummary } from './PaymentsApi';
 import { getStages, type ApiStage } from '@/lib/api/construction-stage.api';
@@ -34,6 +36,7 @@ import {
   getStageTasks,
   getTaskUpdates,
   isTaskOverdue,
+  taskDetailHref,
   type ApiTask,
   type ApiTaskUpdate,
 } from '@/lib/api/task.api';
@@ -465,7 +468,12 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
   // need site management; payments/categories need the `payments`
   // module; buildings/apartments need `projects-mutate`; members are
   // best-effort (OWNER-only endpoint). Every source degrades to null.
-  interface OverviewTask extends ApiTask {
+  interface OverviewTask {
+    id: string;
+    title: string;
+    status: ApiTask['status'];
+    endDate?: string;
+    stageId: string;
     stageName?: string;
   }
   const [overview, setOverview] = useState<{
@@ -495,15 +503,42 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
           getCompanyMembers(companyId).catch(() => [] as ApiCompanyMember[]),
         ]);
       const stages = stagesRaw ? [...stagesRaw].sort((a, b) => a.order - b.order) : null;
+      // Single company-wide task request filtered locally by project
+      // (dashboard/tasks needs site management, same role set as the
+      // updates below). Other roles keep the per-stage reads they can
+      // access — no feature loss, no permission change.
       let tasks: OverviewTask[] | null = null;
       if (stages) {
-        const perStage = await Promise.all(
-          stages.map(async (s) => {
-            const list = await getStageTasks(companyId, id, s.id).catch(() => null);
-            return (list ?? []).map((t): OverviewTask => ({ ...t, stageName: s.name }));
-          }),
-        );
-        tasks = perStage.flat();
+        if (canReadUpdates) {
+          const all = await getCompanyDashboardTasks(companyId).catch(() => null);
+          tasks = all
+            ? all
+                .filter((t) => t.projectId === id)
+                .map((t): OverviewTask => ({
+                  id: t.id,
+                  title: t.title,
+                  status: t.status,
+                  endDate: t.endDate,
+                  stageId: t.stageId,
+                  stageName: t.stageName,
+                }))
+            : null;
+        } else {
+          const perStage = await Promise.all(
+            stages.map(async (s) => {
+              const list = await getStageTasks(companyId, id, s.id).catch(() => null);
+              return (list ?? []).map((t): OverviewTask => ({
+                id: t.id,
+                title: t.title,
+                status: t.status,
+                endDate: t.endDate,
+                stageId: t.stageId,
+                stageName: s.name,
+              }));
+            }),
+          );
+          tasks = perStage.flat();
+        }
       }
       let updates: ApiTaskUpdate[] | null = null;
       if (tasks && canReadUpdates && tasks.length) {
@@ -522,28 +557,28 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
       } else if (tasks) {
         updates = [];
       }
+      // Asset counts without the deep apartments fan-out: floor totals
+      // come from one floors request per building, unit totals from a
+      // single project-scoped page of the company apartments endpoint
+      // (page_size=1, count read from `total`). Same role gate as before.
       let asset: { buildings: number; floors: number; units: number } | null = null;
       if (buildingsRaw) {
         try {
-          const perBuilding = await Promise.all(
-            buildingsRaw.map(async (b) => {
-              const floors = await getFloors(companyId, id, b.id).catch(() => null);
-              if (!floors) return null;
-              const perFloor = await Promise.all(
-                floors.map((f) => getApartments(companyId, id, b.id, f.id).catch(() => null)),
-              );
-              if (perFloor.some((a) => a === null)) return null;
-              return {
-                floors: floors.length,
-                units: (perFloor as ApiApartment[][]).reduce((s, a) => s + a.length, 0),
-              };
-            }),
-          );
-          if (perBuilding.every((b) => b !== null)) {
+          const [floorLists, unitsPage] = await Promise.all([
+            Promise.all(
+              buildingsRaw.map((b) => getFloors(companyId, id, b.id).catch(() => null)),
+            ),
+            getCompanyApartmentsPage(companyId, {
+              page: 1,
+              pageSize: 1,
+              projectId: id,
+            }).catch(() => null),
+          ]);
+          if (floorLists.every((f) => f !== null) && unitsPage) {
             asset = {
               buildings: buildingsRaw.length,
-              floors: perBuilding.reduce((s, b) => s + b!.floors, 0),
-              units: perBuilding.reduce((s, b) => s + b!.units, 0),
+              floors: (floorLists as ApiFloor[][]).reduce((s, f) => s + f.length, 0),
+              units: unitsPage.total,
             };
           }
         } catch {
@@ -763,7 +798,11 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
             />
           </Panel>
           {companyId && (!companyRole || canAccess(companyRole, 'payments')) && (
-            <ProjectPaymentsSummary companyId={companyId} projectId={id} />
+            <ProjectPaymentsSummary
+              companyId={companyId}
+              projectId={id}
+              payments={ov?.payments ?? null}
+            />
           )}
         </div>
       </div>
@@ -787,7 +826,7 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
                   return (
                     <div className="task-row" key={t.id}>
                       <div className="task-row-top">
-                        <TextLink href={'/app/tasks/' + t.id}>{t.title}</TextLink>
+                        <TextLink href={taskDetailHref(t.id, { projectId: id, stageId: t.stageId })}>{t.title}</TextLink>
                         <span className="task-badges">
                           <Badge value={t.status} />
                           {overdue && <Badge value="Overdue" />}

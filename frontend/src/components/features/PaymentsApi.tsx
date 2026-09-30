@@ -887,9 +887,12 @@ export function ProjectPaymentsSection({
 export function ProjectPaymentsSummary({
   companyId,
   projectId,
+  payments: provided,
 }: {
   companyId: string;
   projectId: string;
+  /** Pre-loaded project payments; when omitted the summary fetches once. */
+  payments?: ApiPayment[] | null;
 }) {
   const [total, setTotal] = useState<number | null>(null);
   const [count, setCount] = useState<number | null>(null);
@@ -897,6 +900,7 @@ export function ProjectPaymentsSummary({
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (provided !== undefined) return;
     let cancelled = false;
     getProjectPayments(companyId, projectId)
       .then((rows) => {
@@ -912,18 +916,28 @@ export function ProjectPaymentsSummary({
     return () => {
       cancelled = true;
     };
-  }, [companyId, projectId]);
+  }, [companyId, projectId, provided]);
 
   if (blocked) return null;
+  // Shared data path: derive directly from props (no state, no fetch).
+  const shared = provided === undefined
+    ? null
+    : {
+        total: provided?.reduce((s, p) => s + p.amount, 0) ?? null,
+        count: provided?.length ?? null,
+      };
+  const shownTotal = shared ? shared.total : total;
+  const shownCount = shared ? shared.count : count;
+  const unavailable = failed || shownTotal === null || shownCount === null;
   return (
     <Panel title="Project Payments">
-      {failed || total === null || count === null ? (
+      {unavailable ? (
         <p className="small">Payment totals are currently unavailable.</p>
       ) : (
         <DetailList
           items={[
-            ['Recorded Payments', formatAmount(total)],
-            ['Payments Count', count],
+            ['Recorded Payments', formatAmount(shownTotal as number)],
+            ['Payments Count', shownCount as number],
           ]}
         />
       )}

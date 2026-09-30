@@ -493,6 +493,17 @@ export async function getTaskById(
   return { task, chain };
 }
 
+/** Detail URL with chain hints so the page can skip company traversal. */
+export function taskDetailHref(
+  taskId: string,
+  chain?: { projectId?: string | null; stageId?: string | null },
+): string {
+  if (chain?.projectId && chain?.stageId) {
+    return `/app/tasks/${taskId}?projectId=${chain.projectId}&stageId=${chain.stageId}`;
+  }
+  return `/app/tasks/${taskId}`;
+}
+
 /** True when a task is past due and not completed (date-only compare). */
 export function isTaskOverdue(endDate: string | undefined, status: FrontendTaskStatus): boolean {
   if (!endDate || status === 'COMPLETED') return false;
