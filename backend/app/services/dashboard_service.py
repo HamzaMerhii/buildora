@@ -26,7 +26,7 @@ def get_company_dashboard_summary(
     db: Session,
 ):
     # =========================================================
-    # Verify company
+    # 1. Verify company
     # =========================================================
 
     company = db.scalar(
@@ -42,11 +42,110 @@ def get_company_dashboard_summary(
         )
 
     # =========================================================
-    # Projects
+    # 2. Payment totals grouped by project
+    #
+    # Used as a subquery so project cards + total paid
+    # don't require another DB round trip.
     # =========================================================
 
-    projects = db.scalars(
-        select(Project)
+    payment_by_project_subquery = (
+        select(
+            Payment.project_id.label("project_id"),
+            func.coalesce(
+                func.sum(Payment.amount),
+                0,
+            ).label("paid"),
+        )
+        .group_by(
+            Payment.project_id
+        )
+        .subquery()
+    )
+
+    # =========================================================
+    # 3. Current stage
+    #
+    # Same business logic as before:
+    # first stage by order_index where progress < 100.
+    # =========================================================
+
+    current_stage_subquery = (
+        select(
+            ConstructionStage.name
+        )
+        .where(
+            ConstructionStage.project_id == Project.id,
+            ConstructionStage.progress_percent < 100,
+        )
+        .order_by(
+            ConstructionStage.order_index.asc()
+        )
+        .limit(1)
+        .correlate(Project)
+        .scalar_subquery()
+    )
+
+    # =========================================================
+    # 4. Projects + project counts + paid + current stage
+    #
+    # Replaces:
+    # - project query
+    # - Python project status counting
+    # - payment-by-project query
+    # - current-stage query
+    # =========================================================
+
+    project_rows = db.execute(
+        select(
+            Project,
+
+            func.coalesce(
+                payment_by_project_subquery.c.paid,
+                0,
+            ).label("paid"),
+
+            current_stage_subquery.label(
+                "current_stage"
+            ),
+
+            # Project counts computed in SQL
+            func.count(Project.id)
+            .over()
+            .label("total_count"),
+
+            func.count(Project.id)
+            .filter(
+                Project.status == ProjectStatus.PLANNING
+            )
+            .over()
+            .label("planning_count"),
+
+            func.count(Project.id)
+            .filter(
+                Project.status == ProjectStatus.IN_PROGRESS
+            )
+            .over()
+            .label("in_progress_count"),
+
+            func.count(Project.id)
+            .filter(
+                Project.status == ProjectStatus.COMPLETED
+            )
+            .over()
+            .label("completed_count"),
+
+            func.count(Project.id)
+            .filter(
+                Project.status == ProjectStatus.ON_HOLD
+            )
+            .over()
+            .label("on_hold_count"),
+        )
+        .outerjoin(
+            payment_by_project_subquery,
+            payment_by_project_subquery.c.project_id
+            == Project.id,
+        )
         .where(
             Project.company_id == company_id
         )
@@ -59,35 +158,42 @@ def get_company_dashboard_summary(
     # Project counts
     # =========================================================
 
-    project_counts = {
-        "total": len(projects),
-        "planning": 0,
-        "in_progress": 0,
-        "completed": 0,
-        "on_hold": 0,
-    }
+    if project_rows:
+        first_row = project_rows[0]
 
-    for project in projects:
-
-        if project.status == ProjectStatus.PLANNING:
-            project_counts["planning"] += 1
-
-        elif project.status == ProjectStatus.IN_PROGRESS:
-            project_counts["in_progress"] += 1
-
-        elif project.status == ProjectStatus.COMPLETED:
-            project_counts["completed"] += 1
-
-        elif project.status == ProjectStatus.ON_HOLD:
-            project_counts["on_hold"] += 1
+        project_counts = {
+            "total": first_row.total_count,
+            "planning": first_row.planning_count,
+            "in_progress": first_row.in_progress_count,
+            "completed": first_row.completed_count,
+            "on_hold": first_row.on_hold_count,
+        }
+    else:
+        project_counts = {
+            "total": 0,
+            "planning": 0,
+            "in_progress": 0,
+            "completed": 0,
+            "on_hold": 0,
+        }
 
     # =========================================================
-    # Apartment counts
+    # 5. Apartment total + public in ONE aggregate query
     # =========================================================
 
-    apartment_total = db.scalar(
+    apartment_stats = db.execute(
         select(
-            func.count(Apartment.id)
+            func.count(
+                Apartment.id
+            ).label("total"),
+
+            func.count(
+                Apartment.id
+            )
+            .filter(
+                Apartment.is_public.is_(True)
+            )
+            .label("public"),
         )
         .join(
             Floor,
@@ -104,147 +210,41 @@ def get_company_dashboard_summary(
         .where(
             Project.company_id == company_id
         )
-    ) or 0
+    ).one()
 
-    apartment_public = db.scalar(
-        select(
-            func.count(Apartment.id)
-        )
-        .join(
-            Floor,
-            Apartment.floor_id == Floor.id,
-        )
-        .join(
-            Building,
-            Floor.building_id == Building.id,
-        )
-        .join(
-            Project,
-            Building.project_id == Project.id,
-        )
-        .where(
-            Project.company_id == company_id,
-            Apartment.is_public.is_(True),
-        )
-    ) or 0
+    apartment_total = apartment_stats.total or 0
+    apartment_public = apartment_stats.public or 0
 
     apartments = {
         "total": apartment_total,
         "public": apartment_public,
-        "private": apartment_total - apartment_public,
-    }
-
-    # =========================================================
-    # Budget
-    # =========================================================
-
-    total_budget = sum(
-        (
-            Decimal(str(project.budget or 0))
-            for project in projects
+        "private": (
+            apartment_total - apartment_public
         ),
-        Decimal("0"),
-    )
-
-    # =========================================================
-    # Payments grouped by project
-    # =========================================================
-
-    payment_rows = db.execute(
-        select(
-            Payment.project_id,
-            func.coalesce(
-                func.sum(Payment.amount),
-                0,
-            ).label("paid"),
-        )
-        .join(
-            Project,
-            Payment.project_id == Project.id,
-        )
-        .where(
-            Project.company_id == company_id
-        )
-        .group_by(
-            Payment.project_id
-        )
-    ).all()
-
-    paid_by_project = {
-        project_id: Decimal(str(paid))
-        for project_id, paid in payment_rows
     }
 
-    total_paid = sum(
-        paid_by_project.values(),
-        Decimal("0"),
-    )
-
-    remaining_budget = total_budget - total_paid
-
-    if total_budget > 0:
-        budget_utilization_percent = round(
-            float(
-                (total_paid / total_budget) * 100
-            ),
-            2,
-        )
-    else:
-        budget_utilization_percent = 0
-
     # =========================================================
-    # Current stages
+    # 6. Build project cards and budget totals
     # =========================================================
 
-    current_stage_rows = db.execute(
-        select(
-            ConstructionStage.project_id,
-            ConstructionStage.name,
-            ConstructionStage.order_index,
-            ConstructionStage.progress_percent,
-        )
-        .join(
-            Project,
-            ConstructionStage.project_id == Project.id,
-        )
-        .where(
-            Project.company_id == company_id,
-            ConstructionStage.progress_percent < 100,
-        )
-        .order_by(
-            ConstructionStage.project_id,
-            ConstructionStage.order_index.asc(),
-        )
-    ).all()
-
-    current_stage_by_project = {}
-
-    for (
-        project_id,
-        stage_name,
-        order_index,
-        stage_progress,
-    ) in current_stage_rows:
-
-        if project_id not in current_stage_by_project:
-            current_stage_by_project[project_id] = stage_name
-
-    # =========================================================
-    # Project cards
-    # =========================================================
+    total_budget = Decimal("0")
+    total_paid = Decimal("0")
 
     projects_response = []
 
-    for project in projects:
+    for row in project_rows:
+        project = row.Project
 
         budget = Decimal(
             str(project.budget or 0)
         )
 
-        paid = paid_by_project.get(
-            project.id,
-            Decimal("0"),
+        paid = Decimal(
+            str(row.paid or 0)
         )
+
+        total_budget += budget
+        total_paid += paid
 
         projects_response.append(
             {
@@ -263,16 +263,26 @@ def get_company_dashboard_summary(
                     project.progress_percent or 0
                 ),
 
-                "current_stage": (
-                    current_stage_by_project.get(
-                        project.id
-                    )
-                ),
+                "current_stage": row.current_stage,
             }
         )
 
+    remaining_budget = (
+        total_budget - total_paid
+    )
+
+    if total_budget > 0:
+        budget_utilization_percent = round(
+            float(
+                (total_paid / total_budget) * 100
+            ),
+            2,
+        )
+    else:
+        budget_utilization_percent = 0
+
     # =========================================================
-    # Open leads
+    # 7. Open leads
     # =========================================================
 
     open_leads = db.scalar(
@@ -307,20 +317,22 @@ def get_company_dashboard_summary(
     ) or 0
 
     # =========================================================
-    # Payments by category
+    # 8. Payments by category
     # =========================================================
 
     category_rows = db.execute(
         select(
             PaymentCategory.id,
             PaymentCategory.name,
-            func.sum(Payment.amount).label(
-                "total_paid"
-            ),
+
+            func.sum(
+                Payment.amount
+            ).label("total_paid"),
         )
         .join(
             Payment,
-            Payment.category_id == PaymentCategory.id,
+            Payment.category_id
+            == PaymentCategory.id,
         )
         .join(
             Project,
@@ -334,7 +346,9 @@ def get_company_dashboard_summary(
             PaymentCategory.name,
         )
         .order_by(
-            func.sum(Payment.amount).desc()
+            func.sum(
+                Payment.amount
+            ).desc()
         )
     ).all()
 
@@ -354,7 +368,7 @@ def get_company_dashboard_summary(
     ]
 
     # =========================================================
-    # Recent payments
+    # 9. Recent payments
     # =========================================================
 
     recent_payment_rows = db.execute(
@@ -365,10 +379,16 @@ def get_company_dashboard_summary(
             Payment.reference,
             Payment.description,
 
-            Project.id.label("project_id"),
-            Project.name.label("project_name"),
+            Project.id.label(
+                "project_id"
+            ),
+            Project.name.label(
+                "project_name"
+            ),
 
-            Party.name.label("party_name"),
+            Party.name.label(
+                "party_name"
+            ),
 
             PaymentCategory.name.label(
                 "category_name"
@@ -384,7 +404,8 @@ def get_company_dashboard_summary(
         )
         .outerjoin(
             PaymentCategory,
-            Payment.category_id == PaymentCategory.id,
+            Payment.category_id
+            == PaymentCategory.id,
         )
         .where(
             Project.company_id == company_id
@@ -403,7 +424,10 @@ def get_company_dashboard_summary(
             "project_id": project_id,
             "project_name": project_name,
 
-            "amount": Decimal(str(amount)),
+            "amount": Decimal(
+                str(amount)
+            ),
+
             "payment_date": payment_date,
 
             "party_name": party_name,
@@ -425,7 +449,7 @@ def get_company_dashboard_summary(
     ]
 
     # =========================================================
-    # Tasks
+    # 10. Tasks
     # =========================================================
 
     task_rows = db.execute(
@@ -503,6 +527,7 @@ def get_company_dashboard_summary(
 
     # =========================================================
     # Final response
+    # EXACT SAME CONTRACT
     # =========================================================
 
     return {
@@ -528,9 +553,6 @@ def get_company_dashboard_summary(
 
         "tasks": tasks,
     }
-
-
-
 
 
 def get_company_tasks(
