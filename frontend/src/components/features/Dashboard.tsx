@@ -75,7 +75,7 @@ function DashboardTabs({ role }: { role: string }) {
   return (
     <nav className="tabs" aria-label="Dashboard role">
       {visibleTabs.map(([key, name, href]) => (
-        <Link key={key} className={role === key ? 'active' : ''} href={href}>
+        <Link key={key} className={role === key ? 'active' : ''} href={href} prefetch={false}>
           {name}
         </Link>
       ))}

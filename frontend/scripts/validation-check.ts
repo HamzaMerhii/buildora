@@ -583,6 +583,23 @@ check(
   dashboardPrefetchSrc.includes('prefetch={false}'),
   'dashboard row links disable route prefetching',
 );
+check(
+  dashboardPrefetchSrc.includes("href={href} prefetch={false}"),
+  'dashboard role tabs disable route prefetching',
+);
+const projectsListApiSrc = readFileSync(
+  join(process.cwd(), "src/components/features/ProjectsApi.tsx"),
+  "utf8",
+);
+check(
+  projectsListApiSrc.includes('getCompanyDashboardTasks(companyId)') &&
+    projectsListApiSrc.includes('tasksByProject'),
+  'projects list groups one company task fetch locally by project',
+);
+check(
+  projectsListApiSrc.includes('stages.map((s) => getStageTasks(companyId, p.id, s.id)'),
+  'projects list keeps per-stage fallback when the fast path is unavailable',
+);
 const leadApiListSrc = leadApiSrc.includes('placeholderLeadChain()');
 check(
   leadApiListSrc,

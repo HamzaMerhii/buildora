@@ -28,7 +28,7 @@ import {
   getCompanyApartmentsPage,
   type ApiApartment,
 } from '@/lib/api/apartment.api';
-import { getCompanyDashboardTasks } from '@/lib/api/dashboard.api';
+import { getCompanyDashboardTasks, type ApiDashboardTask } from '@/lib/api/dashboard.api';
 import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { ProjectPaymentsSummary } from './PaymentsApi';
 import { getStages, type ApiStage } from '@/lib/api/construction-stage.api';
@@ -239,20 +239,32 @@ export function ProjectsWorkspaceList() {
   }, [fetchPage]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Card enrichment, loaded once per page of projects. Stages,
-  // buildings, and overdue tasks fan out in parallel; each source is
-  // role-gated (buildings need `projects-mutate`, stages/tasks are
-  // readable by all company roles) and every request degrades to
-  // "unavailable" on failure — the card omits that section.
-  // Payments are intentionally NOT fetched here: cards show the real
-  // persisted projects.progress_percent, never payment-derived totals.
+  // Card enrichment, loaded once per page of projects. Stages and
+  // buildings fan out per project in parallel (their full data feeds
+  // the cards); overdue-task counts come from ONE company-wide task
+  // request grouped locally by project for site-management roles, with
+  // per-stage reads as the fallback for other roles or fast-path
+  // failure — never partial statistics. Each source is role-gated and
+  // every request degrades to "unavailable" on failure.
   const [statsByProject, setStatsByProject] = useState<Map<string, CardStats>>(new Map());
 
   useEffect(() => {
     if (!companyId || !rows.length) return;
     let cancelled = false;
     const canReadStructure = !companyRole || canAccess(companyRole, 'projects-mutate');
+    const canReadAllTasks = !companyRole || canAccess(companyRole, 'tasks-mutate');
     (async () => {
+      const companyTasks = canReadAllTasks
+        ? await getCompanyDashboardTasks(companyId).catch(() => null)
+        : null;
+      const tasksByProject = new Map<string, ApiDashboardTask[]>();
+      if (companyTasks) {
+        for (const t of companyTasks) {
+          const list = tasksByProject.get(t.projectId) ?? [];
+          list.push(t);
+          tasksByProject.set(t.projectId, list);
+        }
+      }
       const entries = await Promise.all(
         rows.map(async (p) => {
           const stats: CardStats = {};
@@ -262,13 +274,19 @@ export function ProjectsWorkspaceList() {
           ]);
           if (stages) {
             stats.stages = stages;
-            const taskLists = await Promise.all(
-              stages.map((s) => getStageTasks(companyId, p.id, s.id).catch(() => null)),
-            );
-            if (taskLists.every((t) => t !== null)) {
-              stats.overdue = taskLists
-                .flat()
-                .filter((t) => isTaskOverdue(t!.endDate, t!.status)).length;
+            if (companyTasks) {
+              stats.overdue = (tasksByProject.get(p.id) ?? []).filter((t) =>
+                isTaskOverdue(t.endDate, t.status),
+              ).length;
+            } else {
+              const taskLists = await Promise.all(
+                stages.map((s) => getStageTasks(companyId, p.id, s.id).catch(() => null)),
+              );
+              if (taskLists.every((t) => t !== null)) {
+                stats.overdue = taskLists
+                  .flat()
+                  .filter((t) => isTaskOverdue(t!.endDate, t!.status)).length;
+              }
             }
           }
           if (buildings) stats.buildings = buildings.length;
