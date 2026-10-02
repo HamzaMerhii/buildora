@@ -310,7 +310,7 @@ export function PaymentTableReal({
           label: 'Actions',
           value: (p) => (
             <div className="row-actions">
-              <TextLink href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>View</TextLink>
+              <TextLink prefetch={false} href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>View</TextLink>
               <button
                 onClick={() => companyId && download(companyId, p)}
                 disabled={!companyId || downloadingId === p.id}
@@ -1304,7 +1304,7 @@ export function FinanceWorkspaceOverview() {
                       {
                         label: 'Actions',
                         value: (p) => (
-                          <TextLink href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>
+                          <TextLink prefetch={false} href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>
                             View
                           </TextLink>
                         ),

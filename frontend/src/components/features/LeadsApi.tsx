@@ -196,8 +196,8 @@ export function LeadsWorkspaceList() {
               label: 'Actions',
               value: (l) => (
                 <div className="row-actions">
-                  <Link href={'/app/leads/' + l.id}>View</Link>
-                  <Link href={'/app/leads/' + l.id + '/status'}>Update</Link>
+                  <Link href={'/app/leads/' + l.id} prefetch={false}>View</Link>
+                  <Link href={'/app/leads/' + l.id + '/status'} prefetch={false}>Update</Link>
                 </div>
               ),
             },
@@ -335,7 +335,7 @@ export function LeadWorkspaceDetail({ id, statusInitially = false }: { id: strin
             />
             {canOpenApartments && (
               <div className="section-space">
-                <TextLink href={'/app/apartments/' + lead.apartmentId}>View Apartment Details</TextLink>
+                <TextLink prefetch={false} href={'/app/apartments/' + lead.apartmentId}>View Apartment Details</TextLink>
               </div>
             )}
           </Panel>

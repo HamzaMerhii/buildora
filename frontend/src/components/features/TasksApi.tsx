@@ -164,7 +164,7 @@ export function TaskTableReal({
         {
           label: 'Task',
           value: (t) => (
-            <Link href={taskDetailHref(t.id, { projectId: hintProjectId ?? t.projectId, stageId: t.stageId })}>
+            <Link href={taskDetailHref(t.id, { projectId: hintProjectId ?? t.projectId, stageId: t.stageId })} prefetch={false}>
               <strong>{t.title}</strong>
             </Link>
           ),
@@ -183,7 +183,7 @@ export function TaskTableReal({
           label: 'Condition',
           value: (t) => <Badge value={isTaskOverdue(t.endDate, t.status) ? 'Overdue' : 'On Track'} />,
         },
-        { label: 'Actions', value: (t) => <TextLink href={taskDetailHref(t.id, { projectId: hintProjectId ?? t.projectId, stageId: t.stageId })}>View Task</TextLink> },
+        { label: 'Actions', value: (t) => <TextLink prefetch={false} href={taskDetailHref(t.id, { projectId: hintProjectId ?? t.projectId, stageId: t.stageId })}>View Task</TextLink> },
       ]}
     />
   );

@@ -158,10 +158,14 @@ export async function resolveLeadChain(
   }
 }
 
-/** Company lead list: one request, no project fan-out. */
+/**
+ * Company lead list: one request, no project fan-out. The backend scopes
+ * by company_id and ignores the hierarchy path segments for this
+ * operation, so inert placeholders avoid a wasteful chain lookup
+ * (SALES already exercises this path via the 403 fallback).
+ */
 export async function getCompanyLeads(companyId: string): Promise<ApiLead[]> {
-  const chain = await resolveLeadChain(companyId);
-  const raw = await apiJson<BackendLead[]>(leadPath(chain, companyId));
+  const raw = await apiJson<BackendLead[]>(leadPath(placeholderLeadChain(), companyId));
   return raw.map(mapLeadResponseToFrontend);
 }
 

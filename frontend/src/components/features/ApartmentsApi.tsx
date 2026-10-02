@@ -147,7 +147,7 @@ function apartmentColumns(showProject: boolean): Column<ApiApartmentWithParents>
     {
       label: 'Apartment',
       value: (a) => (
-        <Link href={'/app/apartments/' + a.id}>
+        <Link href={'/app/apartments/' + a.id} prefetch={false}>
           <strong>Apartment {a.number}</strong>
         </Link>
       ),
@@ -181,8 +181,8 @@ function apartmentColumns(showProject: boolean): Column<ApiApartmentWithParents>
       label: 'Actions',
       value: (a) => (
         <div className="row-actions">
-          <Link href={'/app/apartments/' + a.id}>View</Link>
-          <Link href={'/app/apartments/' + a.id + '/edit'}>Edit</Link>
+          <Link href={'/app/apartments/' + a.id} prefetch={false}>View</Link>
+          <Link href={'/app/apartments/' + a.id + '/edit'} prefetch={false}>Edit</Link>
         </div>
       ),
     },
@@ -794,7 +794,7 @@ export function ApartmentWorkspaceDetail({ id }: { id: string }) {
           <Panel title={'Part of ' + (a.projectName ?? 'project')}>
             <p className="small">{a.projectDescription}</p>
             <div className="section-space">
-              <TextLink href={'/app/projects/' + a.projectId}>View Project</TextLink>
+              <TextLink prefetch={false} href={'/app/projects/' + a.projectId}>View Project</TextLink>
             </div>
           </Panel>
         </div>

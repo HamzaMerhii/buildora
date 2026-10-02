@@ -123,9 +123,9 @@ function ApiProjectCard({ project: p, stats }: { project: ApiProject; stats?: Ca
         <Badge value={p.status} />
       </div>
       <h3>
-        <Link href={'/app/projects/' + p.id}>{p.name}</Link>
+        <Link href={'/app/projects/' + p.id} prefetch={false}>{p.name}</Link>
       </h3>
-      <Link href={'/app/projects/' + p.id} className="project-image" style={{ display: 'block' }} aria-label={'View ' + p.name}>
+      <Link href={'/app/projects/' + p.id} className="project-image" style={{ display: 'block' }} aria-label={'View ' + p.name} prefetch={false}>
         <img src={p.image ?? FALLBACK_IMAGE} alt={p.name} loading="lazy" />
         {dateBadge && <span className="date-badge">{dateBadge}</span>}
       </Link>
@@ -159,7 +159,7 @@ function ApiProjectCard({ project: p, stats }: { project: ApiProject; stats?: Ca
       </div>
       <div className="project-card-footer">
         <span className="counts">{counts.join(' · ')}</span>
-        <TextLink href={'/app/projects/' + p.id}>View</TextLink>
+        <TextLink prefetch={false} href={'/app/projects/' + p.id}>View</TextLink>
       </div>
     </article>
   );
@@ -380,7 +380,7 @@ export function ProjectsWorkspaceList() {
           columns={[
             {
               label: 'Project',
-              value: (p) => <TextLink href={'/app/projects/' + p.id}>{p.name}</TextLink>,
+              value: (p) => <TextLink prefetch={false} href={'/app/projects/' + p.id}>{p.name}</TextLink>,
               sort: (p) => p.name,
             },
             { label: 'Location', value: (p) => p.location ?? '—' },
@@ -716,7 +716,7 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
                 {orderedStages.map((s) => (
                   <div key={s.id}>
                     <div className="panel-heading" style={{ marginBottom: 8 }}>
-                      <TextLink href={'/app/construction/stages/' + s.id + '?projectId=' + id}>
+                      <TextLink prefetch={false} href={'/app/construction/stages/' + s.id + '?projectId=' + id}>
                         {s.name}
                       </TextLink>
                       <Badge value={s.status} />
@@ -826,7 +826,7 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
                   return (
                     <div className="task-row" key={t.id}>
                       <div className="task-row-top">
-                        <TextLink href={taskDetailHref(t.id, { projectId: id, stageId: t.stageId })}>{t.title}</TextLink>
+                        <TextLink prefetch={false} href={taskDetailHref(t.id, { projectId: id, stageId: t.stageId })}>{t.title}</TextLink>
                         <span className="task-badges">
                           <Badge value={t.status} />
                           {overdue && <Badge value="Overdue" />}

@@ -567,6 +567,27 @@ check(
     leadApiSrc.includes('findCompanyApartment'),
   'chain resolution stops paging at the first match',
 );
+const workspaceShellSrc = readFileSync(
+  join(process.cwd(), "src/components/layout/WorkspaceShell.tsx"),
+  "utf8",
+);
+check(
+  workspaceShellSrc.includes('prefetch={false}'),
+  'sidebar navigation disables route prefetching',
+);
+const dashboardPrefetchSrc = readFileSync(
+  join(process.cwd(), "src/components/features/Dashboard.tsx"),
+  "utf8",
+);
+check(
+  dashboardPrefetchSrc.includes('prefetch={false}'),
+  'dashboard row links disable route prefetching',
+);
+const leadApiListSrc = leadApiSrc.includes('placeholderLeadChain()');
+check(
+  leadApiListSrc,
+  'company leads list uses inert path segments, no chain lookup',
+);
 const dataTableSrc = readFileSync(
   join(process.cwd(), "src/components/ui/DataTable.tsx"),
   "utf8",

@@ -141,7 +141,7 @@ function TasksResults({ response, canView }: { response: ApiAiSearchResponse; ca
         {
           label: 'Actions',
           value: (t) =>
-            canView ? <TextLink href={'/app/tasks/' + t.id}>View Task</TextLink> : <>—</>,
+            canView ? <TextLink prefetch={false} href={'/app/tasks/' + t.id}>View Task</TextLink> : <>—</>,
         },
       ]}
     />
@@ -182,7 +182,7 @@ function ProjectsResults({ response, canView }: { response: ApiAiSearchResponse;
         {
           label: 'Actions',
           value: (p) =>
-            canView ? <TextLink href={'/app/projects/' + p.id}>View Project</TextLink> : <>—</>,
+            canView ? <TextLink prefetch={false} href={'/app/projects/' + p.id}>View Project</TextLink> : <>—</>,
         },
       ]}
     />
@@ -220,7 +220,7 @@ function ApartmentsResults({ response, canView }: { response: ApiAiSearchRespons
         {
           label: 'Actions',
           value: (a) =>
-            canView ? <TextLink href={'/app/apartments/' + a.id}>View Apartment</TextLink> : <>—</>,
+            canView ? <TextLink prefetch={false} href={'/app/apartments/' + a.id}>View Apartment</TextLink> : <>—</>,
         },
       ]}
     />
@@ -259,7 +259,7 @@ function PaymentsResults({ response, canView }: { response: ApiAiSearchResponse;
         {
           label: 'Actions',
           value: (p) =>
-            canView ? <TextLink href={'/app/payments/' + p.id}>View Payment</TextLink> : <>—</>,
+            canView ? <TextLink prefetch={false} href={'/app/payments/' + p.id}>View Payment</TextLink> : <>—</>,
         },
       ]}
     />

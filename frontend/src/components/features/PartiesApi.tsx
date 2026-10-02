@@ -132,8 +132,8 @@ export function PartiesWorkspaceList() {
               label: 'Actions',
               value: (p) => (
                 <div className="row-actions">
-                  <Link href={'/app/parties/' + p.id}>View</Link>
-                  {canMutate && <Link href={'/app/parties/' + p.id + '/edit'}>Edit</Link>}
+                  <Link href={'/app/parties/' + p.id} prefetch={false}>View</Link>
+                  {canMutate && <Link href={'/app/parties/' + p.id + '/edit'} prefetch={false}>Edit</Link>}
                 </div>
               ),
             },
@@ -396,7 +396,7 @@ export function PartyWorkspaceDetail({ id }: { id: string }) {
                           </td>
                           <td data-label="Reference" className="muted mono">{x.reference ?? '—'}</td>
                           <td data-label="Actions">
-                            <TextLink href={'/app/payments/' + x.id + '?projectId=' + x.projectId}>
+                            <TextLink prefetch={false} href={'/app/payments/' + x.id + '?projectId=' + x.projectId}>
                               View
                             </TextLink>
                           </td>

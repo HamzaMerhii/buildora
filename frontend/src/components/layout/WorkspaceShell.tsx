@@ -133,6 +133,7 @@ export function WorkspaceShell({
         <Link
           href={platform ? "/platform" : "/app/dashboard"}
           className="brand"
+          prefetch={false}
         >
           <img src="/images/f049f3d28ba1.webp" alt="" />
           <span>
@@ -155,6 +156,7 @@ export function WorkspaceShell({
                 }
                 aria-current={isActive(href) ? 'page' : undefined}
                 onClick={() => setOpen(false)}
+                prefetch={false}
               >
                 <Icon size={19} />
                 <span>{name}</span>
@@ -164,12 +166,12 @@ export function WorkspaceShell({
         </nav>
         <div className="sidebar-bottom">
           {canAccessSettings && (
-          <Link href="/app/settings" className={isActive('/app/settings') ? 'active' : ''} aria-current={isActive('/app/settings') ? 'page' : undefined} onClick={()=>setOpen(false)}>
+          <Link href="/app/settings" className={isActive('/app/settings') ? 'active' : ''} aria-current={isActive('/app/settings') ? 'page' : undefined} onClick={()=>setOpen(false)} prefetch={false}>
             <Settings size={18} />
             <span>Settings</span>
           </Link>
           )}
-          <Link href="/sign-in" onClick={handleLogout}>
+          <Link href="/sign-in" onClick={handleLogout} prefetch={false}>
             <LogOut size={18} />
             <span>Sign out</span>
           </Link>
@@ -194,10 +196,11 @@ export function WorkspaceShell({
               className="icon-button"
               href="/app/ai-assistant"
               aria-label="Open AI assistant"
+              prefetch={false}
             >
               <Sparkles size={18} />
             </Link>
-            <Link className="profile-link" href="/app/settings/profile">
+            <Link className="profile-link" href="/app/settings/profile" prefetch={false}>
               <span className="profile-text" title={displayName ?? 'User'}>
                 {displayName ?? (sessionStatus === 'loading' ? '…' : 'User')}
                 {roleLabel && <small>{roleLabel}</small>}

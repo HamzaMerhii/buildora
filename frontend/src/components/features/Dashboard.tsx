@@ -122,7 +122,7 @@ function CriticalTasksPanel({ tasks }: { tasks: ApiDashboardTask[] }) {
           <div className="activity" key={t.id}>
             <span className="activity-dot" />
             <div>
-              <TextLink href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>{t.title}</TextLink>
+              <TextLink prefetch={false} href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>{t.title}</TextLink>
               <p>
                 {t.projectName} · {t.stageName}
               </p>
@@ -214,7 +214,7 @@ function ProjectAttentionCard({
         )}
         <div>
           <h3>
-            <TextLink href={'/app/projects/' + project.projectId}>{project.name}</TextLink>{' '}
+            <TextLink prefetch={false} href={'/app/projects/' + project.projectId}>{project.name}</TextLink>{' '}
             {project.status && <Badge value={project.status} />}
           </h3>
           <p>{project.location ?? 'Location not supplied'}</p>
@@ -235,7 +235,7 @@ function ProjectAttentionCard({
         <p className="warning-banner" role="alert">
           <TriangleAlert size={13} />
           Overdue: {overdue.title} — {taskDueLabel(overdue.endDate, overdue.status)} ·{' '}
-          <TextLink href={'/app/tasks/' + overdue.id}>View Task</TextLink>
+          <TextLink prefetch={false} href={'/app/tasks/' + overdue.id}>View Task</TextLink>
         </p>
       )}
       <Progress value={project.progressPercent} />
@@ -325,7 +325,7 @@ function RecentPaymentsPanel({
                   {
                     label: 'Actions',
                     value: (p: ApiDashboardRecentPayment) => (
-                      <TextLink href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>
+                      <TextLink prefetch={false} href={'/app/payments/' + p.id + '?projectId=' + p.projectId}>
                         View
                       </TextLink>
                     ),
@@ -399,30 +399,24 @@ function MainDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [freshTasks, freshProjects] = await Promise.all([
+      // Independent dashboard resources load concurrently (single
+      // round). Per-source fallbacks preserve the previous sequential
+      // semantics: summary 403 → null, other summary errors fail the
+      // page, leads failures degrade to null.
+      const canReadLeads = !companyRole || canAccess(companyRole, 'leads');
+      const [freshTasks, freshProjects, summaryRes, leadsRes] = await Promise.all([
         getCompanyDashboardTasks(companyId),
         getProjects(companyId, { limit: 100 }),
+        getCompanyDashboardSummary(companyId).catch((summaryErr: unknown) => {
+          if (summaryErr instanceof ApiError && summaryErr.status === 403) return null;
+          throw summaryErr;
+        }),
+        canReadLeads ? getCompanyLeads(companyId).catch(() => null) : Promise.resolve(null),
       ]);
       setTasks(freshTasks);
       setProjectList(freshProjects);
-      try {
-        setSummary(await getCompanyDashboardSummary(companyId));
-      } catch (summaryErr) {
-        if (summaryErr instanceof ApiError && summaryErr.status === 403) {
-          setSummary(null);
-        } else {
-          throw summaryErr;
-        }
-      }
-      if (!companyRole || canAccess(companyRole, 'leads')) {
-        try {
-          setLeads(await getCompanyLeads(companyId));
-        } catch {
-          setLeads(null);
-        }
-      } else {
-        setLeads(null);
-      }
+      setSummary(summaryRes);
+      setLeads(leadsRes);
     } catch (err) {
       setError(errorFor(err, 'You do not have access to this dashboard.'));
       setSummary(null);
@@ -603,7 +597,7 @@ function OwnerDashboardBody({
                   <div className="activity" key={l.id}>
                     <span className="activity-dot" />
                     <div>
-                      <TextLink href={'/app/leads/' + l.id}>{l.name}</TextLink>
+                      <TextLink prefetch={false} href={'/app/leads/' + l.id}>{l.name}</TextLink>
                       <p>
                         {displayDate(l.createdAt)} <Badge value={l.status} />
                       </p>
@@ -883,7 +877,7 @@ function EngineerDashboard() {
                       <p className="small section-space">Project progress</p>
                       <Progress value={s.projectProgress} />
                       <div className="section-space">
-                        <TextLink href={'/app/construction/stages/' + s.stageId}>
+                        <TextLink prefetch={false} href={'/app/construction/stages/' + s.stageId}>
                           View Stage
                         </TextLink>
                       </div>
@@ -923,8 +917,8 @@ function EngineerDashboard() {
                         label: 'Actions',
                         value: (t) => (
                           <div className="row-actions">
-                            <TextLink href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>View</TextLink>
-                            <TextLink href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId }) + '/updates/new'}>Add Update</TextLink>
+                            <TextLink prefetch={false} href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>View</TextLink>
+                            <TextLink prefetch={false} href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId }) + '/updates/new'}>Add Update</TextLink>
                           </div>
                         ),
                       },
@@ -956,7 +950,7 @@ function EngineerDashboard() {
                     <div className="activity" key={t.id}>
                       <span className="activity-dot" />
                       <div>
-                        <TextLink href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>{t.title}</TextLink>
+                        <TextLink prefetch={false} href={taskDetailHref(t.id, { projectId: t.projectId, stageId: t.stageId })}>{t.title}</TextLink>
                         <p>
                           {t.projectName} · {taskDueLabel(t.endDate, t.status)}
                         </p>
@@ -1001,16 +995,29 @@ function SalesDashboard() {
     setSalesError(null);
     setLeadsError(null);
     try {
-      setSales(await getCompanySalesDashboard(companyId));
-    } catch (err) {
-      setSales(null);
-      setSalesError(errorFor(err, 'You do not have access to this dashboard.'));
-    }
-    try {
-      setLeads(await getCompanyLeads(companyId));
-    } catch (err) {
-      setLeads([]);
-      setLeadsError(errorFor(err, 'You do not have access to leads.'));
+      // Independent sales resources load concurrently.
+      const [salesRes, leadsRes] = await Promise.all([
+        getCompanySalesDashboard(companyId).then(
+          (v) => ({ ok: true as const, value: v }),
+          (err: unknown) => ({ ok: false as const, err }),
+        ),
+        getCompanyLeads(companyId).then(
+          (v) => ({ ok: true as const, value: v }),
+          (err: unknown) => ({ ok: false as const, err }),
+        ),
+      ]);
+      if (salesRes.ok) {
+        setSales(salesRes.value);
+      } else {
+        setSales(null);
+        setSalesError(errorFor(salesRes.err, 'You do not have access to this dashboard.'));
+      }
+      if (leadsRes.ok) {
+        setLeads(leadsRes.value);
+      } else {
+        setLeads([]);
+        setLeadsError(errorFor(leadsRes.err, 'You do not have access to leads.'));
+      }
     } finally {
       setLoading(false);
     }
@@ -1208,8 +1215,8 @@ function SalesDashboard() {
                             label: 'Actions',
                             value: (l) => (
                               <div className="row-actions">
-                                <TextLink href={'/app/leads/' + l.id}>View</TextLink>
-                                <TextLink href={'/app/leads/' + l.id + '/status'}>Update</TextLink>
+                                <TextLink prefetch={false} href={'/app/leads/' + l.id}>View</TextLink>
+                                <TextLink prefetch={false} href={'/app/leads/' + l.id + '/status'}>Update</TextLink>
                               </div>
                             ),
                           },
