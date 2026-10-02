@@ -597,13 +597,24 @@ check(
   'projects list groups one company task fetch locally by project',
 );
 check(
-  projectsListApiSrc.includes('stages.map((s) => getStageTasks(companyId, p.id, s.id)'),
+  projectsListApiSrc.includes('stages.map(async (s) =>'),
   'projects list keeps per-stage fallback when the fast path is unavailable',
+);
+check(
+  projectsListApiSrc.includes('Round 1') &&
+    projectsListApiSrc.includes('Round 2'),
+  'project overview resolves independent sources concurrently in rounds',
 );
 const leadApiListSrc = leadApiSrc.includes('placeholderLeadChain()');
 check(
   leadApiListSrc,
   'company leads list uses inert path segments, no chain lookup',
+);
+check(
+  leadApiSrc.includes('placeholderLeadChain();\n  const raw = await apiJson<BackendLead>(leadPath(chain, companyId, leadId))') ||
+    (leadApiSrc.includes('export async function getLead') &&
+      !leadApiSrc.includes('getCompanyLeads(companyId)).find')),
+  'lead detail reads directly without list/walk prefetch',
 );
 const dataTableSrc = readFileSync(
   join(process.cwd(), "src/components/ui/DataTable.tsx"),

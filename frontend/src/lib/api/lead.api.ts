@@ -174,19 +174,18 @@ export async function getLead(
   leadId: string,
   hint?: Partial<LeadChain>,
 ): Promise<{ lead: ApiLead; chain: LeadChain }> {
-  let chain: LeadChain;
-  if (hint?.projectId && hint?.buildingId && hint?.floorId && hint?.apartmentId) {
-    chain = {
-      projectId: hint.projectId,
-      buildingId: hint.buildingId,
-      floorId: hint.floorId,
-      apartmentId: hint.apartmentId,
-    };
-  } else {
-    const found = (await getCompanyLeads(companyId)).find((l) => l.id === leadId);
-    if (!found) throw new ApiError(404, 'Lead not found.');
-    chain = await resolveLeadChain(companyId, found.apartmentId);
-  }
+  // Path segments are inert for detail reads (the backend scopes by
+  // company_id + lead_id; only POST validates the hierarchy), so a
+  // full hint still wins but no list/walk is needed otherwise.
+  const chain =
+    hint?.projectId && hint?.buildingId && hint?.floorId && hint?.apartmentId
+      ? {
+          projectId: hint.projectId,
+          buildingId: hint.buildingId,
+          floorId: hint.floorId,
+          apartmentId: hint.apartmentId,
+        }
+      : placeholderLeadChain();
   const raw = await apiJson<BackendLead>(leadPath(chain, companyId, leadId));
   return { lead: mapLeadResponseToFrontend(raw), chain };
 }

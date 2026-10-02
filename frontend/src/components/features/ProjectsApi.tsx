@@ -512,13 +512,16 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
     const canReadUpdates =
       !companyRole || canAccess(companyRole, 'tasks-mutate');
     (async () => {
-      const [stagesRaw, paymentsRaw, categoriesRaw, buildingsRaw, membersRaw] =
+      // Round 1 — all independent sources concurrently (project tasks
+      // join this round; they depend only on company/project IDs).
+      const [stagesRaw, paymentsRaw, categoriesRaw, buildingsRaw, membersRaw, dashboardTasksRaw] =
         await Promise.all([
           getStages(companyId, id).catch(() => null),
           canReadPayments ? getProjectPayments(companyId, id).catch(() => null) : null,
           canReadPayments ? getPaymentCategories().catch(() => [] as ApiPaymentCategory[]) : [],
           canReadStructure ? getBuildings(companyId, id).catch(() => null) : null,
           getCompanyMembers(companyId).catch(() => [] as ApiCompanyMember[]),
+          canReadUpdates ? getCompanyDashboardTasks(companyId).catch(() => null) : null,
         ]);
       const stages = stagesRaw ? [...stagesRaw].sort((a, b) => a.order - b.order) : null;
       // Single company-wide task request filtered locally by project
@@ -527,20 +530,19 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
       // access — no feature loss, no permission change.
       let tasks: OverviewTask[] | null = null;
       if (stages) {
-        if (canReadUpdates) {
-          const all = await getCompanyDashboardTasks(companyId).catch(() => null);
-          tasks = all
-            ? all
-                .filter((t) => t.projectId === id)
-                .map((t): OverviewTask => ({
-                  id: t.id,
-                  title: t.title,
-                  status: t.status,
-                  endDate: t.endDate,
-                  stageId: t.stageId,
-                  stageName: t.stageName,
-                }))
-            : null;
+        if (dashboardTasksRaw) {
+          tasks = dashboardTasksRaw
+            .filter((t) => t.projectId === id)
+            .map((t): OverviewTask => ({
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              endDate: t.endDate,
+              stageId: t.stageId,
+              stageName: t.stageName,
+            }));
+        } else if (canReadUpdates) {
+          tasks = null;
         } else {
           const perStage = await Promise.all(
             stages.map(async (s) => {
@@ -558,51 +560,48 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
           tasks = perStage.flat();
         }
       }
-      let updates: ApiTaskUpdate[] | null = null;
-      if (tasks && canReadUpdates && tasks.length) {
-        const ranked = [...tasks].sort((a, b) => {
-          const aOver = isTaskOverdue(a.endDate, a.status) ? 0 : 1;
-          const bOver = isTaskOverdue(b.endDate, b.status) ? 0 : 1;
-          return aOver - bOver || (a.endDate ?? '').localeCompare(b.endDate ?? '');
-        });
-        const perTask = await Promise.all(
-          ranked.slice(0, 6).map((t) => getTaskUpdates(companyId, id, t.stageId, t.id).catch(() => [] as ApiTaskUpdate[])),
-        );
-        updates = perTask
-          .flat()
-          .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-          .slice(0, 8);
-      } else if (tasks) {
-        updates = [];
-      }
-      // Asset counts without the deep apartments fan-out: floor totals
-      // come from one floors request per building, unit totals from a
-      // single project-scoped page of the company apartments endpoint
-      // (page_size=1, count read from `total`). Same role gate as before.
-      let asset: { buildings: number; floors: number; units: number } | null = null;
-      if (buildingsRaw) {
-        try {
-          const [floorLists, unitsPage] = await Promise.all([
-            Promise.all(
-              buildingsRaw.map((b) => getFloors(companyId, id, b.id).catch(() => null)),
-            ),
-            getCompanyApartmentsPage(companyId, {
-              page: 1,
-              pageSize: 1,
-              projectId: id,
-            }).catch(() => null),
-          ]);
-          if (floorLists.every((f) => f !== null) && unitsPage) {
-            asset = {
+      // Round 2 — updates and asset counts are independent of each
+      // other, so they resolve concurrently instead of sequentially.
+      const [updates, asset] = await Promise.all([
+        (async (): Promise<ApiTaskUpdate[] | null> => {
+          if (!tasks || !canReadUpdates || !tasks.length) return tasks ? [] : null;
+          const ranked = [...tasks].sort((a, b) => {
+            const aOver = isTaskOverdue(a.endDate, a.status) ? 0 : 1;
+            const bOver = isTaskOverdue(b.endDate, b.status) ? 0 : 1;
+            return aOver - bOver || (a.endDate ?? '').localeCompare(b.endDate ?? '');
+          });
+          const perTask = await Promise.all(
+            ranked.slice(0, 6).map((t) => getTaskUpdates(companyId, id, t.stageId, t.id).catch(() => [] as ApiTaskUpdate[])),
+          );
+          return perTask
+            .flat()
+            .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+            .slice(0, 8);
+        })(),
+        (async (): Promise<{ buildings: number; floors: number; units: number } | null> => {
+          if (!buildingsRaw) return null;
+          try {
+            const [floorLists, unitsPage] = await Promise.all([
+              Promise.all(
+                buildingsRaw.map((b) => getFloors(companyId, id, b.id).catch(() => null)),
+              ),
+              getCompanyApartmentsPage(companyId, {
+                page: 1,
+                pageSize: 1,
+                projectId: id,
+              }).catch(() => null),
+            ]);
+            if (!floorLists.every((f) => f !== null) || !unitsPage) return null;
+            return {
               buildings: buildingsRaw.length,
               floors: (floorLists as ApiFloor[][]).reduce((s, f) => s + f.length, 0),
               units: unitsPage.total,
             };
+          } catch {
+            return null;
           }
-        } catch {
-          asset = null;
-        }
-      }
+        })(),
+      ]);
       if (!cancelled) {
         setOverview({
           stages,
@@ -784,7 +783,7 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
               </>
             )}
             <p className="section-space">
-              <TextLink href={'/app/projects/' + id + '/payments'}>View Payments</TextLink>
+              <TextLink prefetch={false} href={'/app/projects/' + id + '/payments'}>View Payments</TextLink>
             </p>
           </Panel>
           <Panel title="Asset Structure">
@@ -800,7 +799,7 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
               />
             )}
             <p className="section-space">
-              <TextLink href={'/app/projects/' + id + '/structure'}>Manage Structure</TextLink>
+              <TextLink prefetch={false} href={'/app/projects/' + id + '/structure'}>Manage Structure</TextLink>
             </p>
           </Panel>
           <Panel title="Project Metadata">
@@ -993,7 +992,7 @@ export function LandSummary({ projectId }: { projectId: string }) {
   return (
     <Panel
       title="Land Information & Zoning Matrix"
-      action={<TextLink href={'/app/projects/' + projectId + '/structure'}>Edit Land Information</TextLink>}
+      action={<TextLink prefetch={false} href={'/app/projects/' + projectId + '/structure'}>Edit Land Information</TextLink>}
     >
       <div className="stats" style={{ marginBottom: 0 }}>
         <StatCard
