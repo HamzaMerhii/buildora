@@ -410,6 +410,7 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
                   href={'/app/construction/stages/' + s.id + '?projectId=' + (projectId ?? project)}
                   key={s.id}
                   className={'stage-card ' + (s.status === 'IN_PROGRESS' ? 'active' : '')}
+                  prefetch={false}
                 >
                   <div className="eyebrow">Phase {String(s.order + 1).padStart(2, '0')}</div>
                   <Badge value={s.status} />

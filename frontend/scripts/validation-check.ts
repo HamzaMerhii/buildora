@@ -625,6 +625,14 @@ check(
       !leadApiSrc.includes('getCompanyLeads(companyId)).find')),
   'lead detail reads directly without list/walk prefetch',
 );
+const constructionApiSrc = readFileSync(
+  join(process.cwd(), "src/components/features/ConstructionApi.tsx"),
+  "utf8",
+);
+check(
+  constructionApiSrc.includes('prefetch={false}'),
+  'construction stage cards disable route prefetching',
+);
 const dataTableSrc = readFileSync(
   join(process.cwd(), "src/components/ui/DataTable.tsx"),
   "utf8",
