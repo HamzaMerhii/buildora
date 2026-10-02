@@ -26,6 +26,7 @@ import {
 import {
   getApartments,
   getCompanyApartmentsPage,
+  getProjectApartments,
   type ApiApartment,
 } from '@/lib/api/apartment.api';
 import { getCompanyDashboardTasks, type ApiDashboardTask } from '@/lib/api/dashboard.api';
@@ -1222,10 +1223,12 @@ export function ProjectStructureApi({ id }: { id: string }) {
 /**
  * Real Building Hierarchy for the Project Structure page.
  * Page-level hierarchy load: buildings once, then floors per building
- * in parallel, then apartments per floor in parallel (OWNER/PM only,
- * mirrored via `apartments-mutate`). Lookup maps feed every card, so
- * no entity is fetched twice and no card fetches during render.
- * There is no DELETE building endpoint, so no delete control renders.
+ * in parallel, then one project-scoped apartment page-walk grouped
+ * locally by floor (per-floor reads only as fallback) for OWNER/PM
+ * roles, mirrored via `apartments-mutate`. Lookup maps feed every
+ * card, so no entity is fetched twice and no card fetches during
+ * render. There is no DELETE building endpoint, so no delete control
+ * renders.
  */
 export function BuildingsSection({ projectId }: { projectId: string }) {
   const companyId = useAuthStore((s) => s.companyId);
@@ -1263,20 +1266,32 @@ export function BuildingsSection({ projectId }: { projectId: string }) {
       const aptMap = new Map<string, ApiApartment[]>();
       const aptFailed = new Set<string>();
       if (canReadApartments) {
-        const allFloors = [...floorMap].flatMap(([buildingId, floors]) =>
-          floors.map((f) => ({ buildingId, floor: f })),
-        );
-        const perFloor = await Promise.all(
-          allFloors.map(async ({ floor }) => {
-            const apartments = await getApartments(companyId, projectId, floor.buildingId, floor.id).catch(
-              () => null,
-            );
-            return { floorId: floor.id, apartments };
-          }),
-        );
-        for (const entry of perFloor) {
-          if (entry.apartments === null) aptFailed.add(entry.floorId);
-          else aptMap.set(entry.floorId, entry.apartments);
+        const floorIds = [...floorMap.values()].flat().map((f) => f.id);
+        // Fast path: one project-scoped page walk grouped locally by
+        // floor. Empty floors are seeded so "no apartments" stays
+        // distinct from "failed to load".
+        const walked = await getProjectApartments(companyId, projectId).catch(() => null);
+        if (walked !== null) {
+          for (const id of floorIds) aptMap.set(id, []);
+          for (const a of walked) aptMap.get(a.floorId)?.push(a);
+        } else {
+          // Fallback preserves the previous per-floor resilience: one
+          // failing floor no longer hides the others.
+          const allFloors = [...floorMap].flatMap(([buildingId, floors]) =>
+            floors.map((f) => ({ buildingId, floor: f })),
+          );
+          const perFloor = await Promise.all(
+            allFloors.map(async ({ floor }) => {
+              const apartments = await getApartments(companyId, projectId, floor.buildingId, floor.id).catch(
+                () => null,
+              );
+              return { floorId: floor.id, apartments };
+            }),
+          );
+          for (const entry of perFloor) {
+            if (entry.apartments === null) aptFailed.add(entry.floorId);
+            else aptMap.set(entry.floorId, entry.apartments);
+          }
         }
       }
       setBuildings(list);
@@ -1372,7 +1387,7 @@ function FloorApartmentCards({ apartments }: { apartments: ApiApartment[] }) {
   return (
     <div className="unit-grid">
       {apartments.map((a) => (
-        <Link className="unit-card" key={a.id} href={'/app/apartments/' + a.id}>
+        <Link className="unit-card" key={a.id} href={'/app/apartments/' + a.id} prefetch={false}>
           <div className="unit-card-head">
             <strong>Apartment {a.number}</strong>
             <Badge value={a.status} />
@@ -1435,6 +1450,7 @@ function BuildingBlock({
           <Link
             className="text-link"
             href={'/app/projects/' + projectId + '/buildings/' + b.id + '/edit'}
+            prefetch={false}
           >
             Edit Building
           </Link>
@@ -1468,6 +1484,7 @@ function BuildingBlock({
                 <Link
                   className="text-link"
                   href={'/app/buildings/' + b.id + '/floors/' + f.id + '/edit?projectId=' + projectId}
+                  prefetch={false}
                 >
                   Edit Floor
                 </Link>

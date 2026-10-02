@@ -597,6 +597,15 @@ check(
   'projects list groups one company task fetch locally by project',
 );
 check(
+  projectsListApiSrc.includes('getProjectApartments(companyId, projectId)') &&
+    projectsListApiSrc.includes('aptMap.get(a.floorId)?.push(a)'),
+  'structure page groups one project apartment walk locally by floor',
+);
+check(
+  projectsListApiSrc.includes("href={'/app/apartments/' + a.id} prefetch={false}"),
+  'structure apartment cards disable route prefetching',
+);
+check(
   projectsListApiSrc.includes('stages.map(async (s) =>'),
   'projects list keeps per-stage fallback when the fast path is unavailable',
 );
