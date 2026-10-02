@@ -756,7 +756,7 @@ export function ApartmentForm({ id }: { id?: string }) {
               <div className="three-grid">
                 {existingImages.map((img) => (
                   <div key={img.id} className="stack">
-                    <img src={img.url} alt="Current apartment photo" style={{ borderRadius: 8 }} />
+                    <img src={img.url} alt="Current apartment photo" style={{ borderRadius: 8 }} loading="lazy" />
                     <div>
                       <button
                         className="button secondary"

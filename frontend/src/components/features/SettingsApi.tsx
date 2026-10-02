@@ -222,7 +222,7 @@ export function CompanySettingsSection() {
           {logoPreview ? (
             <img src={logoPreview} alt={`${initialValues?.name ?? 'Company'} logo preview`} className="brand-mark" />
           ) : logo ? (
-            <img src={logo} alt="Company logo" className="brand-mark" />
+            <img src={logo} alt="Company logo" className="brand-mark" loading="lazy" />
           ) : (
             <span className="brand-placeholder" aria-hidden="true">
               {(initialValues?.name ?? 'B').charAt(0).toUpperCase()}

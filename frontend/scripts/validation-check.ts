@@ -558,6 +558,15 @@ check(
     !apartmentApiSrc.includes('getFloors('),
   'apartment api performs no hierarchy traversal',
 );
+const leadApiSrc = readFileSync(
+  join(process.cwd(), "src/lib/api/lead.api.ts"),
+  "utf8",
+);
+check(
+  apartmentApiSrc.includes('findCompanyApartment') &&
+    leadApiSrc.includes('findCompanyApartment'),
+  'chain resolution stops paging at the first match',
+);
 const dataTableSrc = readFileSync(
   join(process.cwd(), "src/components/ui/DataTable.tsx"),
   "utf8",

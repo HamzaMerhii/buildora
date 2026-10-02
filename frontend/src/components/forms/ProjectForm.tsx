@@ -416,6 +416,7 @@ export function ProjectForm({ id }: { id?: string }) {
                   src={currentImage}
                   alt="Current project image"
                   style={{ maxWidth: 320, borderRadius: 8 }}
+                  loading="lazy"
                 />
                 <small>Current image — saving without a new file keeps it.</small>
               </div>

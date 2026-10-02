@@ -126,7 +126,7 @@ function ApiProjectCard({ project: p, stats }: { project: ApiProject; stats?: Ca
         <Link href={'/app/projects/' + p.id}>{p.name}</Link>
       </h3>
       <Link href={'/app/projects/' + p.id} className="project-image" style={{ display: 'block' }} aria-label={'View ' + p.name}>
-        <img src={p.image ?? FALLBACK_IMAGE} alt={p.name} />
+        <img src={p.image ?? FALLBACK_IMAGE} alt={p.name} loading="lazy" />
         {dateBadge && <span className="date-badge">{dateBadge}</span>}
       </Link>
       <div className="project-card-body">
@@ -865,6 +865,7 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
                           className="activity-thumb"
                           src={u.photoUrl}
                           alt={`Site progress verification for ${tasksById.get(u.taskId)?.title ?? 'task'}`}
+                          loading="lazy"
                         />
                       )}
                     </div>

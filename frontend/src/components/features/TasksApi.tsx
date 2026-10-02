@@ -550,6 +550,7 @@ export function TaskWorkspaceDetail({
                             className="update-photo"
                             src={u.photoUrl}
                             alt={`Site progress verification for ${taskTitle}`}
+                            loading="lazy"
                           />
                         )}
                       </div>

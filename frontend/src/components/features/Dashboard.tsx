@@ -206,7 +206,7 @@ function ProjectAttentionCard({
     <div className="attention-card">
       <div className="attention-top">
         {project.image ? (
-          <img src={project.image} alt="" />
+          <img src={project.image} alt="" loading="lazy" />
         ) : (
           <span className="avatar-placeholder" style={{ width: 50, height: 50, fontSize: 20 }} aria-hidden="true">
             {project.name.charAt(0)}
@@ -1108,7 +1108,7 @@ function SalesDashboard() {
                     <article className="project-card" key={u.apartmentId}>
                       <div className="project-image">
                         {u.primaryImage ? (
-                          <img src={u.primaryImage} alt={'Apartment ' + u.unitNumber} />
+                          <img src={u.primaryImage} alt={'Apartment ' + u.unitNumber} loading="lazy" />
                         ) : (
                           <span
                             className="avatar-placeholder"

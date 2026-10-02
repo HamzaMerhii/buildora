@@ -733,7 +733,7 @@ export function ApartmentWorkspaceDetail({ id }: { id: string }) {
             {a.images.length > 1 && (
               <div className="three-grid section-space">
                 {a.images.slice(1).map((img) => (
-                  <img key={img.id} src={img.url} alt={'Apartment ' + a.number + ' photo'} style={{ borderRadius: 8 }} />
+                  <img key={img.id} src={img.url} alt={'Apartment ' + a.number + ' photo'} style={{ borderRadius: 8 }} loading="lazy" />
                 ))}
               </div>
             )}

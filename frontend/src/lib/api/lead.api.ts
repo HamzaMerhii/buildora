@@ -1,5 +1,5 @@
 import { ApiError, apiJson } from './client';
-import { sharedCompanyApartments } from './apartment.api';
+import { findCompanyApartment } from './apartment.api';
 
 /**
  * Lead endpoints (verified against backend/app/routers/lead.py,
@@ -140,10 +140,7 @@ export async function resolveLeadChain(
   apartmentId?: string,
 ): Promise<LeadChain> {
   try {
-    const apartments = await sharedCompanyApartments(companyId);
-    const found = apartmentId
-      ? apartments.find((a) => a.id === apartmentId)
-      : apartments[0];
+    const found = await findCompanyApartment(companyId, apartmentId);
     if (!found) {
       throw new ApiError(404, 'No apartment context available.');
     }

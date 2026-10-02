@@ -306,7 +306,7 @@ export function PlatformCompanyDetail({ id }: { id: string }) {
                 [
                   'Logo',
                   company.logo ? (
-                    <img key="logo" src={company.logo} alt={`${company.name} logo`} style={{ maxWidth: 160 }} />
+                    <img key="logo" src={company.logo} alt={`${company.name} logo`} style={{ maxWidth: 160 }} loading="lazy" />
                   ) : (
                     'Not supplied'
                   ),

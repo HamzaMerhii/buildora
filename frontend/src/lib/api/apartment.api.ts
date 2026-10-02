@@ -529,6 +529,26 @@ export function sharedCompanyApartments(companyId: string): Promise<ApiApartment
   return sharedApartmentWalk.promise;
 }
 
+/**
+ * Single-apartment lookup with early exit: stops paging once the match
+ * (or the first item, when no id is given) is found. Chain resolution
+ * for detail pages needs one apartment, not the full inventory.
+ */
+export async function findCompanyApartment(
+  companyId: string,
+  apartmentId?: string,
+): Promise<ApiApartmentWithParents | undefined> {
+  let page = 1;
+  for (;;) {
+    const response = await getCompanyApartmentsPage(companyId, { page, pageSize: 100 });
+    if (!apartmentId && response.items.length > 0) return response.items[0];
+    const found = apartmentId ? response.items.find((a) => a.id === apartmentId) : undefined;
+    if (found) return found;
+    if (page >= response.totalPages || response.items.length === 0) return undefined;
+    page += 1;
+  }
+}
+
 /** Apartments of one project, via the company endpoint project filter. */
 export async function getProjectApartments(
   companyId: string,
@@ -551,7 +571,7 @@ export async function resolveApartmentChain(
   companyId: string,
   apartmentId: string,
 ): Promise<ApiApartmentWithParents> {
-  const found = (await sharedCompanyApartments(companyId)).find((a) => a.id === apartmentId);
+  const found = await findCompanyApartment(companyId, apartmentId);
   if (!found) throw new ApiError(404, 'Apartment not found.');
   return found;
 }

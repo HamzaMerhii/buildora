@@ -144,7 +144,7 @@ export function useDocumentDirectory(companyId: string | null): DocumentDirector
 
 function DocumentPreviewBody({ doc }: { doc: ApiDocumentWithProject }) {
   if (isPreviewableImage(doc)) {
-    return <img src={doc.fileUrl} alt={doc.name} style={{ maxWidth: '100%', borderRadius: 8 }} />;
+    return <img src={doc.fileUrl} alt={doc.name} style={{ maxWidth: '100%', borderRadius: 8 }} loading="lazy" />;
   }
   if (isPreviewablePdf(doc)) {
     return (

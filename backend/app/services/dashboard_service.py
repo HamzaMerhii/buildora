@@ -25,21 +25,9 @@ def get_company_dashboard_summary(
     company_id: UUID,
     db: Session,
 ):
-    # =========================================================
-    # 1. Verify company
-    # =========================================================
-
-    company = db.scalar(
-        select(Company).where(
-            Company.id == company_id
-        )
-    )
-
-    if company is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Company not found",
-        )
+    # No separate company lookup: the route guard (require_company_owner)
+    # already proves an active membership in this company, so a missing
+    # company cannot reach this service (guard returns 403 first).
 
     # =========================================================
     # 2. Payment totals grouped by project
@@ -449,7 +437,9 @@ def get_company_dashboard_summary(
     ]
 
     # =========================================================
-    # 10. Tasks
+    # 10. Tasks (most recent 100; the dashboard task panels read the
+    # dedicated /dashboard/tasks endpoint, so the summary keeps the
+    # same key with a bounded slice instead of the full collection)
     # =========================================================
 
     task_rows = db.execute(
@@ -490,6 +480,7 @@ def get_company_dashboard_summary(
         .order_by(
             Task.created_at.desc()
         )
+        .limit(100)
     ).all()
 
     tasks = [

@@ -618,16 +618,22 @@ def get_company_apartments(
     if is_public is not None:
         item_conditions.append(Apartment.is_public == is_public)
 
-    total = db.scalar(
-        select(func.count(Apartment.id)).select_from(Apartment)
-        .join(Floor, Apartment.floor_id == Floor.id)
-        .join(Building, Floor.building_id == Building.id)
-        .join(Project, Building.project_id == Project.id)
-        .where(*item_conditions)
-    ) or 0
-
+    # Single aggregate statement serves both numbers: per-status counts
+    # over the company/project/building scope, plus the filtered total
+    # via FILTER (equal to the old separate COUNT when no extra item
+    # filters are present).
+    item_extra = item_conditions[len(scope):]
+    matched_count = (
+        func.count(Apartment.id).filter(*item_extra)
+        if item_extra
+        else func.count(Apartment.id)
+    )
     count_rows = db.execute(
-        select(Apartment.status, func.count(Apartment.id))
+        select(
+            Apartment.status,
+            func.count(Apartment.id).label("scoped"),
+            matched_count.label("matched"),
+        )
         .select_from(Apartment)
         .join(Floor, Apartment.floor_id == Floor.id)
         .join(Building, Floor.building_id == Building.id)
@@ -636,10 +642,12 @@ def get_company_apartments(
         .group_by(Apartment.status)
     ).all()
     counts = {"available": 0, "reserved": 0, "sold": 0}
-    for value, amount in count_rows:
+    total = 0
+    for value, scoped, matched in count_rows:
         key = value.value if isinstance(value, ApartmentStatus) else str(value)
         if key in counts:
-            counts[key] = int(amount)
+            counts[key] = int(scoped)
+        total += int(matched or 0)
 
     rows = db.execute(
         select(
