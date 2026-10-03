@@ -308,6 +308,7 @@ export interface ApiTaskUpdate {
   id: string;
   taskId: string;
   userId: string;
+  userName?: string;
   progress: number;
   status: FrontendTaskStatus;
   notes?: string;
@@ -362,6 +363,50 @@ export async function getTaskUpdate(
     updatePath(companyId, projectId, stageId, taskId, updateId),
   );
   return mapTaskUpdateResponseToFrontend(raw);
+}
+
+// ---------------------------------------------------------------------------
+// Project activity: the backend's global recent-updates feed for one
+// project (GET /companies/{company_id}/projects/{project_id}/activity,
+// newest-first, capped server-side). Replaces per-task updates fan-out
+// wherever only recent activity is displayed. Single-task history,
+// editing, and mutations still use the task-scoped helpers above.
+// ---------------------------------------------------------------------------
+
+/** Wire shape of one project-activity row (see ProjectActivityResponse). */
+export interface BackendProjectActivity {
+  id: string;
+  task_id: string;
+  task_title: string;
+  stage_id: string;
+  stage_name: string;
+  user_id: string;
+  user_name: string | null;
+  progress_percent: number;
+  status: BackendTaskStatus;
+  notes: string | null;
+  photo_url: string | null;
+  created_at: string;
+}
+
+export async function getProjectActivity(
+  companyId: string,
+  projectId: string,
+): Promise<ApiTaskUpdate[]> {
+  const raw = await apiJson<BackendProjectActivity[]>(
+    `/companies/${companyId}/projects/${projectId}/activity`,
+  );
+  return raw.map((a) => ({
+    id: a.id,
+    taskId: a.task_id,
+    userId: a.user_id,
+    userName: a.user_name ?? undefined,
+    progress: a.progress_percent,
+    status: fromBackendTaskStatus(a.status),
+    notes: a.notes ?? undefined,
+    photoUrl: a.photo_url ?? undefined,
+    createdAt: a.created_at,
+  }));
 }
 
 export interface CreateTaskUpdateInput {

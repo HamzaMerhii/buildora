@@ -633,6 +633,30 @@ check(
   constructionApiSrc.includes('prefetch={false}'),
   'construction stage cards disable route prefetching',
 );
+const taskApiSrc = readFileSync(
+  join(process.cwd(), "src/lib/api/task.api.ts"),
+  "utf8",
+);
+check(
+  taskApiSrc.includes('export async function getProjectActivity') &&
+    taskApiSrc.includes('/projects/${projectId}/activity'),
+  'project activity helper targets the project-wide feed',
+);
+check(
+  constructionApiSrc.includes('getProjectActivity(companyId, activeProjectId)') &&
+    !constructionApiSrc.includes('ranked.slice(') &&
+    !constructionApiSrc.includes('.map((t) => getTaskUpdates('),
+  'construction activity uses one project-wide request, batching removed',
+);
+check(
+  projectsListApiSrc.includes('getProjectActivity(companyId, id)') &&
+    !projectsListApiSrc.includes('ranked.slice(0, 6)'),
+  'overview activity uses one project-wide request, top-6 fan-out removed',
+);
+check(
+  taskApiSrc.includes('export async function getTaskUpdates('),
+  'single-task updates helper retained for task details',
+);
 const dataTableSrc = readFileSync(
   join(process.cwd(), "src/components/ui/DataTable.tsx"),
   "utf8",

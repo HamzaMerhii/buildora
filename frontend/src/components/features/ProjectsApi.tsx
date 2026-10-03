@@ -34,8 +34,8 @@ import { ApiError, friendlyMessage } from '@/lib/api/client';
 import { ProjectPaymentsSummary } from './PaymentsApi';
 import { getStages, type ApiStage } from '@/lib/api/construction-stage.api';
 import {
+  getProjectActivity,
   getStageTasks,
-  getTaskUpdates,
   isTaskOverdue,
   taskDetailHref,
   type ApiTask,
@@ -561,24 +561,13 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
           tasks = perStage.flat();
         }
       }
-      // Round 2 — updates and asset counts are independent of each
-      // other, so they resolve concurrently instead of sequentially.
+      // Round 2 — activity feed and asset counts are independent of
+      // each other, so they resolve concurrently instead of
+      // sequentially. Activity is one project-wide request (visible to
+      // all company members per the backend guard); a failure degrades
+      // to "unavailable" rather than a misleading empty feed.
       const [updates, asset] = await Promise.all([
-        (async (): Promise<ApiTaskUpdate[] | null> => {
-          if (!tasks || !canReadUpdates || !tasks.length) return tasks ? [] : null;
-          const ranked = [...tasks].sort((a, b) => {
-            const aOver = isTaskOverdue(a.endDate, a.status) ? 0 : 1;
-            const bOver = isTaskOverdue(b.endDate, b.status) ? 0 : 1;
-            return aOver - bOver || (a.endDate ?? '').localeCompare(b.endDate ?? '');
-          });
-          const perTask = await Promise.all(
-            ranked.slice(0, 6).map((t) => getTaskUpdates(companyId, id, t.stageId, t.id).catch(() => [] as ApiTaskUpdate[])),
-          );
-          return perTask
-            .flat()
-            .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-            .slice(0, 8);
-        })(),
+        getProjectActivity(companyId, id).catch(() => null),
         (async (): Promise<{ buildings: number; floors: number; units: number } | null> => {
           if (!buildingsRaw) return null;
           try {
@@ -873,7 +862,7 @@ export function ProjectWorkspaceDetail({ id }: { id: string }) {
                     <span className="activity-dot" />
                     <div>
                       <strong>
-                        {authorName(u.userId)} · {tasksById.get(u.taskId)?.title ?? 'Task'} →{' '}
+                        {u.userName ?? authorName(u.userId)} · {tasksById.get(u.taskId)?.title ?? 'Task'} →{' '}
                         {u.progress}%
                       </strong>
                       <p>{displayDate(u.createdAt.slice(0, 10))}</p>

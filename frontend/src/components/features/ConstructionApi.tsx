@@ -17,8 +17,8 @@ import {
 } from '@/lib/api/construction-stage.api';
 import { getProject, getProjects } from '@/lib/api/project.api';
 import {
+  getProjectActivity,
   getStageTasks,
-  getTaskUpdates,
   isTaskOverdue,
   type ApiTask,
   type ApiTaskUpdate,
@@ -279,39 +279,19 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
     }
     setLoadingTasks(true);
     try {
-      // Stage task lists are one small request per stage; the unbounded
-      // part used to be updates for EVERY task. Tasks now feed an exact
-      // recent-activity window: ranked by updatedAt (bumped server-side
-      // whenever an update lands via onupdate), batches stop once the 8
-      // newest updates provably cannot be beaten by remaining tasks.
-      const perStage = await Promise.all(
-        stages.map((s) => getStageTasks(companyId, activeProjectId, s.id).catch(() => [] as ApiTask[])),
-      );
-      const all = perStage.flat();
-      setTasks(all);
-      // Exact recent-activity window: tasks are ranked by updatedAt
-      // (bumped server-side whenever an update lands via onupdate), and
-      // batches stop once the 8 newest updates provably cannot be
-      // beaten by remaining tasks. No unbounded per-task fan-out.
-      const ranked = [...all].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-      const found: ApiTaskUpdate[] = [];
-      const byNewest = (a: ApiTaskUpdate, b: ApiTaskUpdate) => (a.createdAt < b.createdAt ? 1 : -1);
-      for (let i = 0; i < ranked.length; i += 10) {
-        const batch = await Promise.all(
-          ranked
-            .slice(i, i + 10)
-            .map((t) => getTaskUpdates(companyId, activeProjectId, t.stageId, t.id).catch(() => [] as ApiTaskUpdate[])),
-        );
-        found.push(...batch.flat());
-        found.sort(byNewest);
-        const restMax = ranked
-          .slice(i + 10)
-          .reduce((m, t) => (t.updatedAt && t.updatedAt > m ? t.updatedAt : m), '');
-        if (found.length >= 8 && restMax <= (found[7]?.createdAt ?? '')) break;
-      }
-      const [parties] = await Promise.all([getParties(companyId).catch(() => [])]);
+      // Stage task lists are one small request per stage (their full
+      // rows feed cards, counts, and attention). Recent activity comes
+      // from the single project-wide feed — no per-task fan-out.
+      const [perStage, activity, parties] = await Promise.all([
+        Promise.all(
+          stages.map((s) => getStageTasks(companyId, activeProjectId, s.id).catch(() => [] as ApiTask[])),
+        ),
+        getProjectActivity(companyId, activeProjectId).catch(() => [] as ApiTaskUpdate[]),
+        getParties(companyId).catch(() => []),
+      ]);
+      setTasks(perStage.flat());
       setPartyNames(new Map(parties.map((p) => [p.id, p.name])));
-      setUpdates(found.slice(0, 8));
+      setUpdates(activity);
     } catch {
       setTasks([]);
       setUpdates([]);
@@ -468,7 +448,7 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
                 <span className="activity-dot" />
                 <div>
                   <strong>
-                    {resolveUpdateAuthorName(u.userId, membersByUserId, sessionUser)}
+                    {u.userName ?? resolveUpdateAuthorName(u.userId, membersByUserId, sessionUser)}
                   </strong>
                   <time>{displayDate(u.createdAt)}</time>
                   <p>Updated progress to {u.progress}%</p>
