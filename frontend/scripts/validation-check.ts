@@ -657,6 +657,15 @@ check(
   taskApiSrc.includes('export async function getTaskUpdates('),
   'single-task updates helper retained for task details',
 );
+const constructionActivitySrc = readFileSync(
+  join(process.cwd(), "src/components/features/ConstructionApi.tsx"),
+  "utf8",
+);
+check(
+  constructionActivitySrc.includes('activityFailed') &&
+    constructionActivitySrc.includes('Task activity is currently unavailable.'),
+  'construction distinguishes failed activity from empty activity',
+);
 const dataTableSrc = readFileSync(
   join(process.cwd(), "src/components/ui/DataTable.tsx"),
   "utf8",

@@ -188,6 +188,7 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [partyNames, setPartyNames] = useState<Map<string, string>>(new Map());
   const [updates, setUpdates] = useState<ApiTaskUpdate[]>([]);
+  const [activityFailed, setActivityFailed] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(!projectId);
   const [loadingStages, setLoadingStages] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -275,6 +276,7 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
     if (!companyId || !activeProjectId || !stages.length) {
       setTasks([]);
       setUpdates([]);
+      setActivityFailed(false);
       return;
     }
     setLoadingTasks(true);
@@ -282,16 +284,20 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
       // Stage task lists are one small request per stage (their full
       // rows feed cards, counts, and attention). Recent activity comes
       // from the single project-wide feed — no per-task fan-out.
-      const [perStage, activity, parties] = await Promise.all([
+      const [perStage, activityRes, parties] = await Promise.all([
         Promise.all(
           stages.map((s) => getStageTasks(companyId, activeProjectId, s.id).catch(() => [] as ApiTask[])),
         ),
-        getProjectActivity(companyId, activeProjectId).catch(() => [] as ApiTaskUpdate[]),
+        getProjectActivity(companyId, activeProjectId).then(
+          (value) => ({ ok: true as const, value }),
+          () => ({ ok: false as const }),
+        ),
         getParties(companyId).catch(() => []),
       ]);
       setTasks(perStage.flat());
       setPartyNames(new Map(parties.map((p) => [p.id, p.name])));
-      setUpdates(activity);
+      setUpdates(activityRes.ok ? activityRes.value : []);
+      setActivityFailed(!activityRes.ok);
     } catch {
       setTasks([]);
       setUpdates([]);
@@ -440,6 +446,8 @@ export function ConstructionWorkspaceOverview({ projectId }: { projectId?: strin
             <p className="small" role="status" aria-live="polite">
               Loading updates…
             </p>
+          ) : activityFailed ? (
+            <p className="small">Task activity is currently unavailable.</p>
           ) : !updates.length ? (
             <p className="small">No updates logged yet.</p>
           ) : (

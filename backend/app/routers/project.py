@@ -9,14 +9,15 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.database.db import get_db
-from app.dependencies.permissions import require_project_manager,require_site_management
+from app.dependencies.permissions import require_project_manager,require_site_management,require_company_member
 from app.models import User
 from app.models.project import ProjectStatus
-from app.schemas.project import ProjectCreate, ProjectCreateResponse, ProjectResponse, ProjectUpdate
+from app.schemas.project import ProjectCreate, ProjectCreateResponse, ProjectResponse, ProjectUpdate, ProjectActivityResponse
 from app.services.imagekit_service import upload_project_image
 from app.services.project_service import (
     create_project,
     get_company_projects,
+    get_project_activity,
     get_project_details,
     update_project)
 

@@ -18,7 +18,6 @@ from app.dependencies.permissions import require_site_management
 from app.models import User
 from app.models.task import TaskStatus
 from app.schemas.task_update import (
-    ProjectActivityResponse,
     TaskUpdateCreate,
     TaskUpdateResponse,
 )
@@ -131,21 +130,5 @@ def get_task_update(
         stage_id=stage_id,
         task_id=task_id,
         update_id=update_id,
-        db=db,
-    )
-
-@router.get(
-    "/{project_id}/activity",
-    response_model=list[ProjectActivityResponse],
-)
-def list_project_activity(
-    company_id: UUID,
-    project_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_company_member),
-):
-    return get_project_activity(
-        company_id=company_id,
-        project_id=project_id,
         db=db,
     )
