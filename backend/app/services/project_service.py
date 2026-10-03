@@ -11,6 +11,10 @@ from app.schemas.project import ProjectCreate, ProjectStatus, ProjectUpdate
 from sqlalchemy.exc import IntegrityError
 from typing import Optional
 
+from app.models.construction_stage import ConstructionStage
+from app.models.task import Task
+from app.models.task_update import TaskUpdate
+
 
 def create_project(
     company_id: UUID,
@@ -160,3 +164,70 @@ def update_project(
     db.refresh(existing_project)
 
     return existing_project
+
+
+def get_project_activity(
+    company_id: UUID,
+    project_id: UUID,
+    db: Session,
+):
+    # Verify project belongs to the requested company
+    project_exists = db.scalar(
+        select(Project.id).where(
+            Project.id == project_id,
+            Project.company_id == company_id,
+        )
+    )
+
+    if project_exists is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    # Retrieve the latest updates across all project tasks
+    rows = db.execute(
+        select(
+            TaskUpdate.id,
+            TaskUpdate.task_id,
+
+            Task.title.label("task_title"),
+
+            ConstructionStage.id.label("stage_id"),
+            ConstructionStage.name.label("stage_name"),
+
+            TaskUpdate.user_id,
+            User.name.label("user_name"),
+
+            TaskUpdate.progress_percent,
+            TaskUpdate.status,
+            TaskUpdate.notes,
+            TaskUpdate.photo_url,
+            TaskUpdate.created_at,
+        )
+        .join(
+            Task,
+            TaskUpdate.task_id == Task.id,
+        )
+        .join(
+            ConstructionStage,
+            Task.stage_id == ConstructionStage.id,
+        )
+        .outerjoin(
+            User,
+            TaskUpdate.user_id == User.id,
+        )
+        .where(
+            ConstructionStage.project_id == project_id,
+        )
+        .order_by(
+            TaskUpdate.created_at.desc(),
+            TaskUpdate.id.desc(),
+        )
+        .limit(8)
+    ).mappings().all()
+
+    return [
+        dict(row)
+        for row in rows
+    ]

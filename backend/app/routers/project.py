@@ -211,3 +211,20 @@ async def update_existing_project(
         project=project_data,
         db=db,
     )
+
+
+@router.get(
+    "/{project_id}/activity",
+    response_model=list[ProjectActivityResponse],
+)
+def list_project_activity(
+    company_id: UUID,
+    project_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_company_member),
+):
+    return get_project_activity(
+        company_id=company_id,
+        project_id=project_id,
+        db=db,
+    )

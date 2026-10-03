@@ -7,6 +7,7 @@ from pydantic import Field
 
 from app.models import ProjectStatus
 from app.schemas.base import BaseSchema
+from app.models.task import TaskStatus
 
 
 class ProjectCreate(BaseSchema):
@@ -73,4 +74,25 @@ class ProjectProgressUpdateResponse(BaseSchema):
     id: UUID
     project_id: UUID
     progress_percent: int
+    created_at: datetime
+
+
+class ProjectActivityResponse(BaseSchema):
+    id: UUID
+
+    task_id: UUID
+    task_title: str
+
+    stage_id: UUID
+    stage_name: str
+
+    user_id: UUID
+    user_name: str | None = None
+
+    progress_percent: int
+    status: TaskStatus
+
+    notes: str | None = None
+    photo_url: str | None = None
+
     created_at: datetime
