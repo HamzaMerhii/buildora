@@ -17,7 +17,7 @@ export default function PartnerCard({ partner, index, progress, reduced }: Props
   const y = useTransform(progress, [start, start + 0.08], [14, 0]);
   const label = `0${index + 1}`;
   return <motion.div className="partner-row" style={{ opacity, x: reduced ? 0 : x, y: reduced ? 0 : y }}>
-    <Link className="partner-card-link" href={`/companies/${partner.id}`} aria-label={`View ${partner.name} company profile`}>
+    <Link className="partner-card-link" href={`/companies/${partner.id}`} aria-label={`View ${partner.name} company profile`} prefetch={false}>
       <NeonPanel className="partner-card">
       <span className="partner-index" aria-hidden="true">{label}</span>
       <span className="partner-logo" aria-hidden={!logoFailed}>

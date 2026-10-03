@@ -625,6 +625,22 @@ check(
       !leadApiSrc.includes('getCompanyLeads(companyId)).find')),
   'lead detail reads directly without list/walk prefetch',
 );
+const partnerCardSrc = readFileSync(
+  join(process.cwd(), "src/components/public/partners/PartnerCard.tsx"),
+  "utf8",
+);
+check(
+  partnerCardSrc.includes('prefetch={false}'),
+  'homepage partner cards disable detail prefetching',
+);
+const partnersPanelSrc = readFileSync(
+  join(process.cwd(), "src/components/public/partners/PartnersPanel.tsx"),
+  "utf8",
+);
+check(
+  partnersPanelSrc.includes('prefetch={false}'),
+  'homepage companies link disables route prefetching',
+);
 const constructionApiSrc = readFileSync(
   join(process.cwd(), "src/components/features/ConstructionApi.tsx"),
   "utf8",

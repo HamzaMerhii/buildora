@@ -27,7 +27,7 @@ export default function PartnersPanel({ progress, reduced }: { progress: MotionV
         <p className="partners-eyebrow">Built together</p>
         <h2>Our Construction Partners</h2>
         <p>Buildora works with experienced construction companies and contractors to deliver reliable, high-quality projects.</p>
-        <Link className="partners-all" href="/companies">View All Companies</Link>
+        <Link className="partners-all" href="/companies" prefetch={false}>View All Companies</Link>
       </motion.div>
       <div className="partners-grid">
         {partners === null && !failed && (
