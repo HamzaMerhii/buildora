@@ -11,3 +11,4 @@ sendgrid
 fastapi-mail
 reportlab
 google-genai
+redis

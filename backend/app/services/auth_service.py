@@ -26,6 +26,10 @@ FORGOT_PASSWORD_MESSAGE = (
     "a password reset link has been sent."
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def register_user(
     user: UserCreateSchema,
     db: Session
@@ -195,13 +199,7 @@ async def forgot_password(
         )
     )
 
-    # Never reveal if an email exists or not
-    if user is None:
-        return {
-            "message": FORGOT_PASSWORD_MESSAGE
-        }
-
-    if not user.is_active:
+    if user is None or not user.is_active:
         return {
             "message": FORGOT_PASSWORD_MESSAGE
         }
@@ -223,7 +221,12 @@ async def forgot_password(
             reset_link=reset_link,
         )
 
-    except Exception:
+    except Exception as exc:
+        logger.exception(
+            "Failed to send password reset email: %s",
+            exc,
+        )
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to send password reset email",

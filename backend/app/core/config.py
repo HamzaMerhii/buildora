@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 465
     MAIL_SERVER: str = "smtp.hostinger.com"
     MAIL_FROM_NAME: str = "Buildora"
-
+    REDIS_URL: str
     FRONTEND_URL: str = "http://localhost:3000"
     access_token_expire_minutes: int = 180
 
