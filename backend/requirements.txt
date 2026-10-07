@@ -12,3 +12,4 @@ fastapi-mail
 reportlab
 google-genai
 redis
+resend[async]

@@ -13,16 +13,14 @@ class Settings(BaseSettings):
 
     secret_key: str
     algorithm: str = "HS256"
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str
     FROM_EMAIL: str
-    SMTP_PORT: int = 465
-    MAIL_SERVER: str = "smtp.hostinger.com"
     MAIL_FROM_NAME: str = "Buildora"
     REDIS_URL: str
     FRONTEND_URL: str = "http://localhost:3000"
     access_token_expire_minutes: int = 180
-
+    RESEND_API_KEY: str
+    FROM_EMAIL: str
+    MAIL_FROM_NAME: str = "Buildora"
     IMAGEKIT_PUBLIC_KEY: str = ""
     IMAGEKIT_PRIVATE_KEY: str = ""
     IMAGEKIT_URL_ENDPOINT: str = ""

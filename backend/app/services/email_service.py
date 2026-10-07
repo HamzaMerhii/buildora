@@ -1,27 +1,9 @@
-from fastapi_mail import (
-    ConnectionConfig,
-    FastMail,
-    MessageSchema,
-    MessageType,
-)
+import resend
 
 from app.core.config import settings
 
 
-mail_config = ConnectionConfig(
-    MAIL_USERNAME=settings.SMTP_USER,
-    MAIL_PASSWORD=settings.SMTP_PASSWORD,
-    MAIL_FROM=settings.FROM_EMAIL,
-    MAIL_PORT=settings.SMTP_PORT,
-    MAIL_SERVER=settings.MAIL_SERVER,
-    MAIL_FROM_NAME=settings.MAIL_FROM_NAME,
-
-    MAIL_STARTTLS=False,
-    MAIL_SSL_TLS=True,
-
-    USE_CREDENTIALS=True,
-    VALIDATE_CERTS=True,
-)
+resend.api_key = settings.RESEND_API_KEY
 
 
 async def send_password_reset_email(
@@ -118,13 +100,14 @@ async def send_password_reset_email(
     </html>
     """
 
-    message = MessageSchema(
-        subject="Reset your Buildora password",
-        recipients=[to_email],
-        body=html,
-        subtype=MessageType.html,
-    )
+    params: resend.Emails.SendParams = {
+        "from": (
+            f"{settings.MAIL_FROM_NAME} "
+            f"<{settings.FROM_EMAIL}>"
+        ),
+        "to": [to_email],
+        "subject": "Reset your Buildora password",
+        "html": html,
+    }
 
-    fm = FastMail(mail_config)
-
-    await fm.send_message(message)
+    return await resend.Emails.send_async(params)
